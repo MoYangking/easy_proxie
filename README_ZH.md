@@ -499,7 +499,7 @@ services:
     restart: unless-stopped
     ports:
       - "2323:2323"       # 节点池/混合模式入口
-      - "9091:9091"       # Web 监控面板
+      - "9090:9090"       # Web 监控面板
       - "24000-24200:24000-24200"  # 多端口/混合模式
     volumes:
       - ./config.yaml:/data/easy-proxies/config.yaml

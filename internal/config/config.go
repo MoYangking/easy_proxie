@@ -160,7 +160,7 @@ func (c *Config) normalize() error {
 		c.MultiPort.BasePort = 28000
 	}
 	if c.Management.Listen == "" {
-		c.Management.Listen = "127.0.0.1:9090"
+		c.Management.Listen = "0.0.0.0:9090"
 	}
 	if c.Management.ProbeTarget == "" {
 		c.Management.ProbeTarget = "www.apple.com:80"
@@ -370,7 +370,7 @@ func (c *Config) NormalizeWithPortMap(portMap map[string]uint16) error {
 		c.MultiPort.BasePort = 28000
 	}
 	if c.Management.Listen == "" {
-		c.Management.Listen = "127.0.0.1:9090"
+		c.Management.Listen = "0.0.0.0:9090"
 	}
 	if c.Management.ProbeTarget == "" {
 		c.Management.ProbeTarget = "www.apple.com:80"
