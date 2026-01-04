@@ -908,6 +908,7 @@
     <div class="tabs">
       <button class="tab active" onclick="switchTab('monitor')">📊 节点监控</button>
       <button class="tab" onclick="switchTab('manage')">⚙️ 节点管理</button>
+      <button class="tab" onclick="switchTab('subscription')">🔗 订阅管理</button>
       <button class="tab" onclick="switchTab('debug')">🐞 调试面板</button>
     </div>
 
@@ -1017,6 +1018,72 @@
         <p>点击"添加节点"开始配置</p>
       </div>
     </div><!-- end manageTab -->
+
+    <!-- 订阅管理 -->
+    <div id="subscriptionTab" class="tab-content">
+      <div class="manage-header">
+        <h2>订阅管理</h2>
+        <p class="manage-desc">添加/删除订阅链接，配置定时刷新参数。保存后可点击“保存并导入”立即拉取订阅并重载。</p>
+      </div>
+
+      <div class="reload-warning" style="background: rgba(255, 149, 0, 0.1); border-color: rgba(255, 149, 0, 0.3); color: var(--warning);">
+        ⚠️ 提示：订阅节点来源会写入 nodes.txt；刷新订阅会覆盖您对 nodes.txt 的修改
+      </div>
+
+      <form class="login-form" onsubmit="handleSubscriptionSave(event)" style="max-width: 860px;">
+        <div class="form-group">
+          <label class="form-label">订阅链接</label>
+          <div style="display:flex; gap: 8px; align-items: center;">
+            <input type="url" id="subscriptionUrlInput" class="form-input" placeholder="https://example.com/subscription" style="flex: 1;" />
+            <button type="button" class="btn btn-secondary" onclick="addSubscriptionUrl()">添加</button>
+          </div>
+          <div id="subscriptionListContainer" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"></div>
+          <p class="form-help">支持 Base64 / Clash YAML / 纯文本订阅</p>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+          <label class="form-label" for="subRefreshEnabled" style="margin: 0; flex: 1;">启用定时刷新</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="subRefreshEnabled" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="subInterval">刷新间隔</label>
+          <input type="text" id="subInterval" class="form-input" placeholder="例如：1h 或 30m" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="subTimeout">订阅超时</label>
+          <input type="text" id="subTimeout" class="form-input" placeholder="例如：30s" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="subHealthTimeout">健康检查超时</label>
+          <input type="text" id="subHealthTimeout" class="form-input" placeholder="例如：60s" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="subDrainTimeout">排空超时</label>
+          <input type="text" id="subDrainTimeout" class="form-input" placeholder="例如：30s" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="subMinNodes">最少可用节点数</label>
+          <input type="number" id="subMinNodes" class="form-input" min="1" step="1" />
+        </div>
+
+        <div id="subscriptionError" class="login-error"></div>
+        <div class="modal-buttons">
+          <button type="button" class="btn btn-secondary" id="refreshSubPageBtn" onclick="refreshSubscription('page')">
+            <span id="refreshSubPageText">刷新订阅</span>
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="saveSubscriptionConfig(true)">保存并导入</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div><!-- end subscriptionTab -->
 
     <!-- 调试面板 -->
     <div id="debugTab" class="tab-content">
@@ -1130,55 +1197,9 @@
         </div>
         <p class="form-help" style="margin-top: -8px;">启用后所有节点将忽略 SSL 证书错误，修改后需重载生效</p>
 
-        <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 16px 0;"></div>
-
-        <div class="form-group">
-          <label class="form-label">订阅链接</label>
-          <div style="display:flex; gap: 8px; align-items: center;">
-            <input type="url" id="settingSubscriptionUrl" class="form-input" placeholder="https://example.com/subscription" style="flex: 1;" />
-            <button type="button" class="btn btn-secondary" onclick="addSubscriptionUrl()">添加</button>
-          </div>
-          <div id="subscriptionList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"></div>
-          <p class="form-help">支持 Base64 / Clash YAML / 纯文本订阅；保存后可点击“保存并导入”或在首页点“刷新订阅”立即生效</p>
-        </div>
-
-        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-          <label class="form-label" for="settingSubRefreshEnabled" style="margin: 0; flex: 1;">启用定时刷新</label>
-          <label class="toggle-switch">
-            <input type="checkbox" id="settingSubRefreshEnabled" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="settingSubInterval">刷新间隔</label>
-          <input type="text" id="settingSubInterval" class="form-input" placeholder="例如：1h 或 30m" />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="settingSubTimeout">订阅超时</label>
-          <input type="text" id="settingSubTimeout" class="form-input" placeholder="例如：30s" />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="settingSubHealthTimeout">健康检查超时</label>
-          <input type="text" id="settingSubHealthTimeout" class="form-input" placeholder="例如：60s" />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="settingSubDrainTimeout">排空超时</label>
-          <input type="text" id="settingSubDrainTimeout" class="form-input" placeholder="例如：30s" />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="settingSubMinNodes">最少可用节点数</label>
-          <input type="number" id="settingSubMinNodes" class="form-input" min="1" step="1" />
-        </div>
-
         <div id="settingsError" class="login-error"></div>
         <div class="modal-buttons">
           <button type="button" class="btn btn-secondary" onclick="hideSettingsModal()">取消</button>
-          <button type="button" class="btn btn-secondary" onclick="saveSettingsAndImport()">保存并导入</button>
           <button type="submit" class="btn btn-primary">保存</button>
         </div>
       </form>
@@ -1649,7 +1670,7 @@
       }
     }
 
-    async function refreshSubscription() {
+    async function refreshSubscription(source) {
       // Check if nodes have been modified since last refresh
       try {
         const statusRes = await fetch('/api/subscription/status');
@@ -1670,11 +1691,15 @@
         // Ignore status check errors, proceed with refresh
       }
 
-      const btn = document.getElementById('refreshSubBtn');
-      const text = document.getElementById('refreshSubText');
+      const btn = source === 'page'
+        ? document.getElementById('refreshSubPageBtn')
+        : document.getElementById('refreshSubBtn');
+      const text = source === 'page'
+        ? document.getElementById('refreshSubPageText')
+        : document.getElementById('refreshSubText');
 
-      btn.disabled = true;
-      text.textContent = '刷新中...';
+      if (btn) btn.disabled = true;
+      if (text) text.textContent = '刷新中...';
 
       try {
         const res = await fetch('/api/subscription/refresh', { method: 'POST' });
@@ -1692,8 +1717,8 @@
       } catch (err) {
         showToast('订阅刷新失败: ' + err.message, 'error');
       } finally {
-        btn.disabled = false;
-        text.textContent = '刷新订阅';
+        if (btn) btn.disabled = false;
+        if (text) text.textContent = '刷新订阅';
       }
     }
 
@@ -1797,32 +1822,13 @@
 
     // ========== 系统设置功能 ==========
 
-    let subscriptionUrls = [];
-
     async function showSettingsModal() {
       try {
-        const [settingsRes, subRes] = await Promise.all([
-          fetch('/api/settings'),
-          fetch('/api/subscription/config')
-        ]);
-
-        const settings = settingsRes.ok ? await settingsRes.json() : {};
-        document.getElementById('settingExternalIP').value = settings.external_ip || '';
-        document.getElementById('settingProbeTarget').value = settings.probe_target || '';
-        document.getElementById('settingSkipCertVerify').checked = settings.skip_cert_verify || false;
-
-        const subData = subRes.ok ? await subRes.json() : {};
-        subscriptionUrls = Array.isArray(subData.subscriptions) ? subData.subscriptions : [];
-        renderSubscriptionList();
-
-        const refresh = subData.subscription_refresh || {};
-        document.getElementById('settingSubRefreshEnabled').checked = !!refresh.enabled;
-        document.getElementById('settingSubInterval').value = refresh.interval || '1h';
-        document.getElementById('settingSubTimeout').value = refresh.timeout || '30s';
-        document.getElementById('settingSubHealthTimeout').value = refresh.health_check_timeout || '60s';
-        document.getElementById('settingSubDrainTimeout').value = refresh.drain_timeout || '30s';
-        document.getElementById('settingSubMinNodes').value = refresh.min_available_nodes || 1;
-
+        const res = await fetch('/api/settings');
+        const data = res.ok ? await res.json() : {};
+        document.getElementById('settingExternalIP').value = data.external_ip || '';
+        document.getElementById('settingProbeTarget').value = data.probe_target || '';
+        document.getElementById('settingSkipCertVerify').checked = data.skip_cert_verify || false;
         document.getElementById('settingsError').classList.remove('show');
         document.getElementById('settingsOverlay').classList.add('show');
       } catch (err) {
@@ -1835,8 +1841,82 @@
       document.getElementById('settingsOverlay').classList.remove('show');
     }
 
+    async function handleSettingsSave(event) {
+      event.preventDefault();
+      const errorEl = document.getElementById('settingsError');
+      errorEl.classList.remove('show');
+
+      const payload = {
+        external_ip: document.getElementById('settingExternalIP').value.trim(),
+        probe_target: document.getElementById('settingProbeTarget').value.trim(),
+        skip_cert_verify: document.getElementById('settingSkipCertVerify').checked
+      };
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          if (data.need_reload) {
+            showToast('设置已保存，部分选项需重载生效', 'success');
+          } else {
+            showToast('设置已保存', 'success');
+          }
+          hideSettingsModal();
+        } else {
+          errorEl.textContent = data.error || '保存失败';
+          errorEl.classList.add('show');
+        }
+      } catch (err) {
+        errorEl.textContent = '保存失败: ' + err.message;
+        errorEl.classList.add('show');
+      }
+    }
+
+    // ========== 订阅管理功能 ==========
+
+    let subscriptionUrls = [];
+
+    async function loadSubscriptionConfig() {
+      const errorEl = document.getElementById('subscriptionError');
+      if (errorEl) errorEl.classList.remove('show');
+
+      try {
+        const res = await fetch('/api/subscription/config');
+        if (res.status === 401) {
+          showToast('请先登录', 'error');
+          document.getElementById('loginOverlay').classList.add('show');
+          return;
+        }
+        if (!res.ok) throw new Error('加载失败');
+        const data = await res.json();
+
+        subscriptionUrls = Array.isArray(data.subscriptions) ? data.subscriptions : [];
+        renderSubscriptionList();
+
+        const refresh = data.subscription_refresh || {};
+        document.getElementById('subRefreshEnabled').checked = !!refresh.enabled;
+        document.getElementById('subInterval').value = refresh.interval || '1h';
+        document.getElementById('subTimeout').value = refresh.timeout || '30s';
+        document.getElementById('subHealthTimeout').value = refresh.health_check_timeout || '60s';
+        document.getElementById('subDrainTimeout').value = refresh.drain_timeout || '30s';
+        document.getElementById('subMinNodes').value = refresh.min_available_nodes || 1;
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = '加载失败: ' + err.message;
+          errorEl.classList.add('show');
+        } else {
+          showToast('加载订阅配置失败: ' + err.message, 'error');
+        }
+      }
+    }
+
     function renderSubscriptionList() {
-      const container = document.getElementById('subscriptionList');
+      const container = document.getElementById('subscriptionListContainer');
       if (!container) return;
 
       if (!subscriptionUrls || subscriptionUrls.length === 0) {
@@ -1856,7 +1936,7 @@
     }
 
     function addSubscriptionUrl() {
-      const input = document.getElementById('settingSubscriptionUrl');
+      const input = document.getElementById('subscriptionUrlInput');
       if (!input) return;
 
       const u = (input.value || '').trim();
@@ -1894,77 +1974,59 @@
       renderSubscriptionList();
     }
 
-    async function saveAllSettings({ importAfterSave } = { importAfterSave: false }) {
-      const errorEl = document.getElementById('settingsError');
-      errorEl.classList.remove('show');
-
-      const settingsPayload = {
-        external_ip: document.getElementById('settingExternalIP').value.trim(),
-        probe_target: document.getElementById('settingProbeTarget').value.trim(),
-        skip_cert_verify: document.getElementById('settingSkipCertVerify').checked
-      };
+    async function saveSubscriptionConfig(importAfterSave) {
+      const errorEl = document.getElementById('subscriptionError');
+      if (errorEl) errorEl.classList.remove('show');
 
       const subPayload = {
         subscriptions: subscriptionUrls || [],
         subscription_refresh: {
-          enabled: document.getElementById('settingSubRefreshEnabled').checked,
-          interval: document.getElementById('settingSubInterval').value.trim(),
-          timeout: document.getElementById('settingSubTimeout').value.trim(),
-          health_check_timeout: document.getElementById('settingSubHealthTimeout').value.trim(),
-          drain_timeout: document.getElementById('settingSubDrainTimeout').value.trim(),
-          min_available_nodes: parseInt(document.getElementById('settingSubMinNodes').value, 10) || 1
+          enabled: document.getElementById('subRefreshEnabled').checked,
+          interval: document.getElementById('subInterval').value.trim(),
+          timeout: document.getElementById('subTimeout').value.trim(),
+          health_check_timeout: document.getElementById('subHealthTimeout').value.trim(),
+          drain_timeout: document.getElementById('subDrainTimeout').value.trim(),
+          min_available_nodes: parseInt(document.getElementById('subMinNodes').value, 10) || 1
         }
       };
 
       try {
-        const settingsRes = await fetch('/api/settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(settingsPayload)
-        });
-        const settingsData = await settingsRes.json();
-        if (!settingsRes.ok) {
-          errorEl.textContent = settingsData.error || '保存失败';
-          errorEl.classList.add('show');
-          return;
-        }
-
-        const subRes = await fetch('/api/subscription/config', {
+        const res = await fetch('/api/subscription/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(subPayload)
         });
-        const subData = await subRes.json();
-        if (!subRes.ok) {
-          errorEl.textContent = subData.error || '保存失败';
-          errorEl.classList.add('show');
+
+        const data = await res.json();
+        if (!res.ok) {
+          if (errorEl) {
+            errorEl.textContent = data.error || '保存失败';
+            errorEl.classList.add('show');
+          } else {
+            showToast(data.error || '保存失败', 'error');
+          }
           return;
         }
 
-        const needReload = !!settingsData.need_reload;
-        showToast(needReload ? '设置已保存，部分选项需重载生效' : '设置已保存', 'success');
-
-        hideSettingsModal();
-
-        // Update subscription UI state after saving.
+        showToast('订阅设置已保存', 'success');
         fetchSubscriptionStatus();
 
         if (importAfterSave) {
-          await refreshSubscription();
+          await refreshSubscription('page');
         }
       } catch (err) {
-        errorEl.textContent = '保存失败: ' + err.message;
-        errorEl.classList.add('show');
+        if (errorEl) {
+          errorEl.textContent = '保存失败: ' + err.message;
+          errorEl.classList.add('show');
+        } else {
+          showToast('保存失败: ' + err.message, 'error');
+        }
       }
     }
 
-    async function handleSettingsSave(event) {
+    async function handleSubscriptionSave(event) {
       event.preventDefault();
-      await saveAllSettings({ importAfterSave: false });
-    }
-
-    async function saveSettingsAndImport() {
-      await saveAllSettings({ importAfterSave: true });
+      await saveSubscriptionConfig(false);
     }
 
     // ========== 节点管理功能 ==========
@@ -1982,6 +2044,8 @@
 
       if (tabName === 'manage') {
         loadConfigNodes();
+      } else if (tabName === 'subscription') {
+        loadSubscriptionConfig();
       } else if (tabName === 'debug') {
         loadDebugData();
       }
