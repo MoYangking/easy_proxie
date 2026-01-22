@@ -3,7 +3,7 @@ ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 ARG GOPROXY=https://proxy.golang.org,direct
-RUN go env -w GOPROXY=${GOPROXY} && go mod download
+RUN go env -w GOPROXY=${GOPROXY} && go mod tidy && go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -tags "with_utls with_quic with_grpc with_wireguard with_gvisor" -o easy-proxies ./cmd/easy_proxies
 
