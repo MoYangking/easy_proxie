@@ -5,8 +5,8 @@ go 1.24.1
 toolchain go1.24.4
 
 require (
-	github.com/sagernet/sing v0.7.13
-	github.com/sagernet/sing-box v1.12.12
+	github.com/sagernet/sing v0.7.14
+	github.com/sagernet/sing-box v1.12.17
 	gopkg.in/yaml.v3 v3.0.1
 )
 
