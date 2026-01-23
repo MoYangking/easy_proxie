@@ -100,6 +100,7 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/nodes/config", s.withAuth(s.handleConfigNodes))
 	mux.HandleFunc("/api/nodes/config/", s.withAuth(s.handleConfigNodeItem))
 	mux.HandleFunc("/api/nodes/probe-all", s.withAuth(s.handleProbeAll))
+	mux.HandleFunc("/api/nodes/delete-failed", s.withAuth(s.handleDeleteFailedNodes))
 	mux.HandleFunc("/api/nodes/", s.withAuth(s.handleNodeAction))
 	mux.HandleFunc("/api/debug", s.withAuth(s.handleDebug))
 	mux.HandleFunc("/api/export", s.withAuth(s.handleExport))
@@ -215,8 +216,96 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 只返回初始检查通过的可用节点
-	payload := map[string]any{"nodes": s.mgr.SnapshotFiltered(true)}
+	all := queryBool(r.URL.Query().Get("all"), false)
+	var nodes []Snapshot
+	if all {
+		nodes = s.mgr.Snapshot()
+	} else {
+		nodes = s.mgr.SnapshotFiltered(true)
+	}
+	payload := map[string]any{"nodes": nodes}
 	writeJSON(w, payload)
+}
+
+func (s *Server) handleDeleteFailedNodes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.ensureNodeManager(w) {
+		return
+	}
+
+	snapshots := s.mgr.Snapshot()
+	failed := make([]Snapshot, 0)
+	for _, snap := range snapshots {
+		if !snap.InitialCheckDone || snap.Available {
+			continue
+		}
+		if strings.TrimSpace(snap.Name) == "" {
+			continue
+		}
+		failed = append(failed, snap)
+	}
+
+	if len(failed) == 0 {
+		writeJSON(w, map[string]any{
+			"deleted":      0,
+			"total_failed": 0,
+			"message":      "没有探测失败的节点",
+		})
+		return
+	}
+
+	deletedNames := make([]string, 0, len(failed))
+	deleteErrors := make([]string, 0)
+	for _, snap := range failed {
+		if err := s.nodeMgr.DeleteNode(r.Context(), snap.Name); err != nil {
+			deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", snap.Name, err))
+			continue
+		}
+		deletedNames = append(deletedNames, snap.Name)
+	}
+
+	if len(deletedNames) == 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		writeJSON(w, map[string]any{
+			"deleted":      0,
+			"total_failed": len(failed),
+			"errors":       deleteErrors,
+			"error":        "删除失败",
+		})
+		return
+	}
+
+	reload := queryBool(r.URL.Query().Get("reload"), true)
+	if reload {
+		if err := s.nodeMgr.TriggerReload(r.Context()); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			writeJSON(w, map[string]any{
+				"deleted":       len(deletedNames),
+				"total_failed":  len(failed),
+				"deleted_nodes": deletedNames,
+				"errors":        deleteErrors,
+				"error":         fmt.Sprintf("删除成功，但重载失败: %v", err),
+			})
+			return
+		}
+	}
+
+	message := fmt.Sprintf("已删除 %d 个探测失败节点", len(deletedNames))
+	if reload {
+		message += "，并已重载生效"
+	} else {
+		message += "，请点击重载使配置生效"
+	}
+	writeJSON(w, map[string]any{
+		"deleted":       len(deletedNames),
+		"total_failed":  len(failed),
+		"deleted_nodes": deletedNames,
+		"errors":        deleteErrors,
+		"message":       message,
+	})
 }
 
 func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
@@ -291,6 +380,38 @@ func (s *Server) handleNodeAction(w http.ResponseWriter, r *http.Request) {
 			latencyMs = 1 // Round up sub-millisecond latencies to 1ms
 		}
 		writeJSON(w, map[string]any{"message": "探测成功", "latency_ms": latencyMs})
+	case "delete":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if !s.ensureNodeManager(w) {
+			return
+		}
+		e, err := s.mgr.entry(tag)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(w, map[string]any{"error": err.Error()})
+			return
+		}
+		e.mu.RLock()
+		nodeName := strings.TrimSpace(e.info.Name)
+		e.mu.RUnlock()
+		if nodeName == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{"error": "missing node name"})
+			return
+		}
+		if err := s.nodeMgr.DeleteNode(r.Context(), nodeName); err != nil {
+			s.respondNodeError(w, err)
+			return
+		}
+		if err := s.nodeMgr.TriggerReload(r.Context()); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			writeJSON(w, map[string]any{"error": fmt.Sprintf("节点已删除，但重载失败: %v", err)})
+			return
+		}
+		writeJSON(w, map[string]any{"message": "节点已删除并已重载生效"})
 	case "release":
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -407,6 +528,22 @@ func writeJSON(w http.ResponseWriter, payload any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(payload)
+}
+
+// queryBool parses typical boolean query parameter values.
+func queryBool(raw string, defaultValue bool) bool {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return defaultValue
+	}
+	switch value {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	case "0", "false", "f", "no", "n", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }
 
 // withAuth 认证中间件，如果配置了密码则需要验证

@@ -51,6 +51,7 @@ const maxTimelineSize = 20
 // Snapshot is a runtime view of a proxy node.
 type Snapshot struct {
 	NodeInfo
+	Generation        uint64          `json:"generation,omitempty"`
 	FailureCount      int             `json:"failure_count"`
 	SuccessCount      int64           `json:"success_count"`
 	Blacklisted       bool            `json:"blacklisted"`
@@ -75,6 +76,7 @@ type EntryHandle struct {
 
 type entry struct {
 	info             NodeInfo
+	generation       uint64
 	failure          int
 	success          int64
 	timeline         []TimelineEvent
@@ -97,6 +99,7 @@ type Manager struct {
 	cfg        Config
 	probeDst   M.Socksaddr
 	probeReady bool
+	generation atomic.Uint64
 	mu         sync.RWMutex
 	nodes      map[string]*entry
 	ctx        context.Context
@@ -119,6 +122,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		ctx:    ctx,
 		cancel: cancel,
 	}
+	m.generation.Store(1)
 	if cfg.ProbeTarget != "" {
 		target := cfg.ProbeTarget
 		// Strip URL scheme if present (e.g., "https://www.google.com:443" -> "www.google.com:443")
@@ -152,6 +156,23 @@ func NewManager(cfg Config) (*Manager, error) {
 // SetLogger sets the logger for the manager.
 func (m *Manager) SetLogger(logger Logger) {
 	m.logger = logger
+}
+
+// BumpGeneration advances the internal generation counter.
+// Entries registered in older generations are ignored by snapshots and probes.
+func (m *Manager) BumpGeneration() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.generation.Add(1)
+}
+
+// CurrentGeneration returns the current internal generation value.
+func (m *Manager) CurrentGeneration() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.generation.Load()
 }
 
 // StartPeriodicHealthCheck starts a background goroutine that periodically checks all nodes.
@@ -212,9 +233,14 @@ func (m *Manager) probeAllNodes(timeout time.Duration) {
 	var wg sync.WaitGroup
 	var availableCount atomic.Int32
 	var failedCount atomic.Int32
+	curGen := m.generation.Load()
 
 	for _, e := range entries {
 		e.mu.RLock()
+		if e.generation != curGen {
+			e.mu.RUnlock()
+			continue
+		}
 		probeFn := e.probe
 		tag := e.info.Tag
 		e.mu.RUnlock()
@@ -278,17 +304,22 @@ func parsePort(value string) uint16 {
 
 // Register ensures a node is tracked and returns its entry.
 func (m *Manager) Register(info NodeInfo) *EntryHandle {
+	gen := m.generation.Load()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.nodes[info.Tag]
 	if !ok {
 		e = &entry{
-			info:     info,
-			timeline: make([]TimelineEvent, 0, maxTimelineSize),
+			info:       info,
+			generation: gen,
+			timeline:   make([]TimelineEvent, 0, maxTimelineSize),
 		}
 		m.nodes[info.Tag] = e
 	} else {
+		e.mu.Lock()
 		e.info = info
+		e.generation = gen
+		e.mu.Unlock()
 	}
 	return &EntryHandle{ref: e}
 }
@@ -317,9 +348,13 @@ func (m *Manager) SnapshotFiltered(onlyAvailable bool) []Snapshot {
 		list = append(list, e)
 	}
 	m.mu.RUnlock()
+	curGen := m.generation.Load()
 	snapshots := make([]Snapshot, 0, len(list))
 	for _, e := range list {
 		snap := e.snapshot()
+		if snap.Generation != curGen {
+			continue
+		}
 		// 如果只要可用节点：
 		// - 跳过已完成检查但不可用的节点
 		// - 保留未完成检查的节点（它们会在首次使用时被检查）
@@ -381,10 +416,17 @@ func (m *Manager) Release(tag string) error {
 }
 
 func (m *Manager) entry(tag string) (*entry, error) {
+	curGen := m.generation.Load()
 	m.mu.RLock()
 	e, ok := m.nodes[tag]
 	m.mu.RUnlock()
 	if !ok {
+		return nil, fmt.Errorf("node %s not found", tag)
+	}
+	e.mu.RLock()
+	gen := e.generation
+	e.mu.RUnlock()
+	if gen != curGen {
 		return nil, fmt.Errorf("node %s not found", tag)
 	}
 	return e, nil
@@ -410,6 +452,7 @@ func (e *entry) snapshot() Snapshot {
 
 	return Snapshot{
 		NodeInfo:          e.info,
+		Generation:        e.generation,
 		FailureCount:      e.failure,
 		SuccessCount:      e.success,
 		Blacklisted:       e.blacklist,
