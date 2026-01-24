@@ -985,6 +985,10 @@ func (c *Config) SaveSettings() error {
 	saveCfg.ExternalIP = c.ExternalIP
 	saveCfg.Management.ProbeTarget = c.Management.ProbeTarget
 	saveCfg.SkipCertVerify = c.SkipCertVerify
+	saveCfg.Listener.Username = c.Listener.Username
+	saveCfg.Listener.Password = c.Listener.Password
+	saveCfg.MultiPort.Username = c.MultiPort.Username
+	saveCfg.MultiPort.Password = c.MultiPort.Password
 
 	newData, err := yaml.Marshal(&saveCfg)
 	if err != nil {

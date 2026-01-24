@@ -96,6 +96,7 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/auth", s.handleAuth)
 	mux.HandleFunc("/api/settings", s.withAuth(s.handleSettings))
+	mux.HandleFunc("/api/proxy/auth", s.withAuth(s.handleProxyAuth))
 	mux.HandleFunc("/api/nodes", s.withAuth(s.handleNodes))
 	mux.HandleFunc("/api/nodes/config", s.withAuth(s.handleConfigNodes))
 	mux.HandleFunc("/api/nodes/config/", s.withAuth(s.handleConfigNodeItem))
@@ -135,9 +136,17 @@ func (s *Server) SetConfig(cfg *config.Config) {
 	defer s.cfgMu.Unlock()
 	s.cfgSrc = cfg
 	if cfg != nil {
+		proxyUsername := cfg.Listener.Username
+		proxyPassword := cfg.Listener.Password
+		if cfg.Mode == "multi-port" || cfg.Mode == "hybrid" {
+			proxyUsername = cfg.MultiPort.Username
+			proxyPassword = cfg.MultiPort.Password
+		}
 		s.cfg.ExternalIP = cfg.ExternalIP
 		s.cfg.ProbeTarget = cfg.Management.ProbeTarget
 		s.cfg.SkipCertVerify = cfg.SkipCertVerify
+		s.cfg.ProxyUsername = proxyUsername
+		s.cfg.ProxyPassword = proxyPassword
 	}
 }
 
@@ -706,6 +715,174 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"skip_cert_verify": req.SkipCertVerify,
 			"need_reload":      true,
 		})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+type proxyAuthSection struct {
+	Enabled  *bool   `json:"enabled,omitempty"`
+	Username *string `json:"username,omitempty"`
+	Password *string `json:"password,omitempty"`
+}
+
+type proxyAuthRequest struct {
+	Listener  *proxyAuthSection `json:"listener,omitempty"`
+	MultiPort *proxyAuthSection `json:"multi_port,omitempty"`
+	Reload    *bool             `json:"reload,omitempty"`
+}
+
+func applyProxyAuthSection(req *proxyAuthSection, username, password *string) error {
+	if req == nil || username == nil || password == nil {
+		return nil
+	}
+	// No changes.
+	if req.Enabled == nil && req.Username == nil && req.Password == nil {
+		return nil
+	}
+
+	// Explicitly disabled: clear credentials.
+	if req.Enabled != nil && !*req.Enabled {
+		*username = ""
+		*password = ""
+		return nil
+	}
+
+	currentUsername := strings.TrimSpace(*username)
+	currentPassword := *password
+
+	nextUsername := currentUsername
+	if req.Username != nil {
+		nextUsername = strings.TrimSpace(*req.Username)
+	}
+
+	nextPassword := currentPassword
+	if req.Password != nil {
+		if strings.TrimSpace(*req.Password) != "" {
+			nextPassword = *req.Password
+		}
+	}
+
+	enabled := nextUsername != ""
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	if !enabled {
+		*username = ""
+		*password = ""
+		return nil
+	}
+
+	wasEnabled := currentUsername != ""
+	if nextUsername == "" {
+		return errors.New("启用代理认证时用户名不能为空")
+	}
+	if !wasEnabled && strings.TrimSpace(nextPassword) == "" {
+		return errors.New("启用代理认证时密码不能为空")
+	}
+
+	*username = nextUsername
+	*password = nextPassword
+	return nil
+}
+
+func (s *Server) handleProxyAuth(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureNodeManager(w) {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		cfg, err := s.nodeMgr.ConfigSnapshot(r.Context())
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			writeJSON(w, map[string]any{"error": err.Error()})
+			return
+		}
+		if cfg == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, map[string]any{"error": "配置未初始化"})
+			return
+		}
+
+		listenerEnabled := strings.TrimSpace(cfg.Listener.Username) != ""
+		multiPortEnabled := strings.TrimSpace(cfg.MultiPort.Username) != ""
+		writeJSON(w, map[string]any{
+			"mode": cfg.Mode,
+			"listener": map[string]any{
+				"enabled":      listenerEnabled,
+				"username":     cfg.Listener.Username,
+				"has_password": strings.TrimSpace(cfg.Listener.Password) != "",
+			},
+			"multi_port": map[string]any{
+				"enabled":      multiPortEnabled,
+				"username":     cfg.MultiPort.Username,
+				"has_password": strings.TrimSpace(cfg.MultiPort.Password) != "",
+			},
+		})
+	case http.MethodPut:
+		var req proxyAuthRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{"error": "请求格式错误"})
+			return
+		}
+
+		reload := false
+		if req.Reload != nil {
+			reload = *req.Reload
+		}
+
+		s.cfgMu.Lock()
+		cfg := s.cfgSrc
+		if cfg == nil {
+			s.cfgMu.Unlock()
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, map[string]any{"error": "配置存储未初始化"})
+			return
+		}
+
+		if err := applyProxyAuthSection(req.Listener, &cfg.Listener.Username, &cfg.Listener.Password); err != nil {
+			s.cfgMu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{"error": err.Error()})
+			return
+		}
+		if err := applyProxyAuthSection(req.MultiPort, &cfg.MultiPort.Username, &cfg.MultiPort.Password); err != nil {
+			s.cfgMu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{"error": err.Error()})
+			return
+		}
+
+		proxyUsername := cfg.Listener.Username
+		proxyPassword := cfg.Listener.Password
+		if cfg.Mode == "multi-port" || cfg.Mode == "multi_port" || cfg.Mode == "hybrid" {
+			proxyUsername = cfg.MultiPort.Username
+			proxyPassword = cfg.MultiPort.Password
+		}
+		s.cfg.ProxyUsername = proxyUsername
+		s.cfg.ProxyPassword = proxyPassword
+
+		if err := cfg.SaveSettings(); err != nil {
+			s.cfgMu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			writeJSON(w, map[string]any{"error": err.Error()})
+			return
+		}
+		s.cfgMu.Unlock()
+
+		if reload {
+			if err := s.nodeMgr.TriggerReload(r.Context()); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				writeJSON(w, map[string]any{"error": fmt.Sprintf("设置已保存，但重载失败: %v", err), "need_reload": true})
+				return
+			}
+			writeJSON(w, map[string]any{"message": "代理认证设置已保存并已重载生效", "need_reload": false})
+			return
+		}
+
+		writeJSON(w, map[string]any{"message": "代理认证设置已保存，请点击重载使配置生效", "need_reload": true})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}

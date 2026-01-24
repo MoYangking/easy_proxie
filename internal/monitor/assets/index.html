@@ -1209,6 +1209,54 @@
         </div>
         <p class="form-help" style="margin-top: -8px;">启用后所有节点将忽略 SSL 证书错误，修改后需重载生效</p>
 
+        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+          <label class="form-label" for="settingAutoReload" style="margin: 0; flex: 1;">保存后自动重载</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="settingAutoReload" onchange="persistAutoReloadSetting()" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="form-help" style="margin-top: -8px;">开启后保存将自动重载配置（会中断现有连接）</p>
+
+        <div class="form-group" style="margin-top: 8px;">
+          <label class="form-label" style="margin-bottom: 6px;">代理认证</label>
+          <p class="form-help" style="margin: 0;">
+            当前模式：<span id="proxyAuthModeText">-</span>（关闭开关表示无需认证；密码留空表示保持不变）
+          </p>
+        </div>
+
+        <div id="proxyAuthListenerSection">
+          <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+            <label class="form-label" for="proxyAuthListenerEnabled" style="margin: 0; flex: 1;">Pool 入口需要认证</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proxyAuthListenerEnabled" onchange="updateProxyAuthUI()" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group" id="proxyAuthListenerFields">
+            <label class="form-label" for="proxyAuthListenerUsername">用户名</label>
+            <input type="text" id="proxyAuthListenerUsername" class="form-input" placeholder="请输入用户名" />
+            <label class="form-label" for="proxyAuthListenerPassword">密码</label>
+            <input type="password" id="proxyAuthListenerPassword" class="form-input" placeholder="留空表示保持不变" autocomplete="new-password" />
+          </div>
+        </div>
+
+        <div id="proxyAuthMultiPortSection">
+          <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+            <label class="form-label" for="proxyAuthMultiPortEnabled" style="margin: 0; flex: 1;">Multi-Port 入口需要认证</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proxyAuthMultiPortEnabled" onchange="updateProxyAuthUI()" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group" id="proxyAuthMultiPortFields">
+            <label class="form-label" for="proxyAuthMultiPortUsername">用户名</label>
+            <input type="text" id="proxyAuthMultiPortUsername" class="form-input" placeholder="请输入用户名" />
+            <label class="form-label" for="proxyAuthMultiPortPassword">密码</label>
+            <input type="password" id="proxyAuthMultiPortPassword" class="form-input" placeholder="留空表示保持不变" autocomplete="new-password" />
+          </div>
+        </div>
+
         <div id="settingsError" class="login-error"></div>
         <div class="modal-buttons">
           <button type="button" class="btn btn-secondary" onclick="hideSettingsModal()">取消</button>
@@ -1936,14 +1984,143 @@
 
     // ========== 系统设置功能 ==========
 
+    let proxyAuthMode = '';
+
+    function persistAutoReloadSetting() {
+      const el = document.getElementById('settingAutoReload');
+      if (!el) return;
+      localStorage.setItem('settingAutoReload', el.checked ? '1' : '0');
+    }
+
+    function loadAutoReloadSetting() {
+      const el = document.getElementById('settingAutoReload');
+      if (!el) return;
+      const saved = localStorage.getItem('settingAutoReload');
+      el.checked = saved === '1' || saved === 'true';
+    }
+
+    function updateProxyAuthUI() {
+      const mode = (proxyAuthMode || '').toLowerCase();
+      const showListener = mode === '' || mode === 'pool' || mode === 'hybrid';
+      const showMultiPort = mode === '' || mode === 'multi-port' || mode === 'multi_port' || mode === 'hybrid';
+
+      const listenerSection = document.getElementById('proxyAuthListenerSection');
+      const multiPortSection = document.getElementById('proxyAuthMultiPortSection');
+      if (listenerSection) listenerSection.style.display = showListener ? 'block' : 'none';
+      if (multiPortSection) multiPortSection.style.display = showMultiPort ? 'block' : 'none';
+
+      const listenerEnabled = document.getElementById('proxyAuthListenerEnabled');
+      const listenerFields = document.getElementById('proxyAuthListenerFields');
+      if (listenerEnabled && listenerFields) {
+        listenerFields.style.display = listenerEnabled.checked ? 'block' : 'none';
+      }
+
+      const mpEnabled = document.getElementById('proxyAuthMultiPortEnabled');
+      const mpFields = document.getElementById('proxyAuthMultiPortFields');
+      if (mpEnabled && mpFields) {
+        mpFields.style.display = mpEnabled.checked ? 'block' : 'none';
+      }
+    }
+
+    async function loadProxyAuthSettings() {
+      try {
+        const res = await fetch('/api/proxy/auth');
+        if (res.status === 401) {
+          showToast('请先登录', 'error');
+          document.getElementById('loginOverlay').classList.add('show');
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+
+        proxyAuthMode = data.mode || '';
+        const modeEl = document.getElementById('proxyAuthModeText');
+        if (modeEl) modeEl.textContent = proxyAuthMode || '-';
+
+        const listener = data.listener || {};
+        const multiPort = data.multi_port || {};
+
+        const lEnabledEl = document.getElementById('proxyAuthListenerEnabled');
+        const lUserEl = document.getElementById('proxyAuthListenerUsername');
+        const lPassEl = document.getElementById('proxyAuthListenerPassword');
+        if (lEnabledEl) lEnabledEl.checked = !!listener.enabled;
+        if (lUserEl) lUserEl.value = listener.username || '';
+        if (lPassEl) lPassEl.value = '';
+
+        const mpEnabledEl = document.getElementById('proxyAuthMultiPortEnabled');
+        const mpUserEl = document.getElementById('proxyAuthMultiPortUsername');
+        const mpPassEl = document.getElementById('proxyAuthMultiPortPassword');
+        if (mpEnabledEl) mpEnabledEl.checked = !!multiPort.enabled;
+        if (mpUserEl) mpUserEl.value = multiPort.username || '';
+        if (mpPassEl) mpPassEl.value = '';
+
+        updateProxyAuthUI();
+      } catch (err) {
+        console.error('Failed to load proxy auth settings', err);
+      }
+    }
+
+    function buildProxyAuthPayload() {
+      const autoReloadEl = document.getElementById('settingAutoReload');
+      const reload = !!(autoReloadEl && autoReloadEl.checked);
+
+      const payload = { reload };
+      const mode = (proxyAuthMode || '').toLowerCase();
+      const includeListener = mode === '' || mode === 'pool' || mode === 'hybrid';
+      const includeMultiPort = mode === '' || mode === 'multi-port' || mode === 'multi_port' || mode === 'hybrid';
+
+      if (includeListener) {
+        const enabledEl = document.getElementById('proxyAuthListenerEnabled');
+        const usernameEl = document.getElementById('proxyAuthListenerUsername');
+        const passwordEl = document.getElementById('proxyAuthListenerPassword');
+        payload.listener = {
+          enabled: !!(enabledEl && enabledEl.checked),
+          username: usernameEl ? usernameEl.value.trim() : '',
+          password: passwordEl ? passwordEl.value : ''
+        };
+      }
+
+      if (includeMultiPort) {
+        const enabledEl = document.getElementById('proxyAuthMultiPortEnabled');
+        const usernameEl = document.getElementById('proxyAuthMultiPortUsername');
+        const passwordEl = document.getElementById('proxyAuthMultiPortPassword');
+        payload.multi_port = {
+          enabled: !!(enabledEl && enabledEl.checked),
+          username: usernameEl ? usernameEl.value.trim() : '',
+          password: passwordEl ? passwordEl.value : ''
+        };
+      }
+
+      return payload;
+    }
+
+    async function saveProxyAuthSettings() {
+      const res = await fetch('/api/proxy/auth', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildProxyAuthPayload())
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      return { res, data };
+    }
+
     async function showSettingsModal() {
       try {
         const res = await fetch('/api/settings');
+        if (res.status === 401) {
+          showToast('请先登录', 'error');
+          document.getElementById('loginOverlay').classList.add('show');
+          return;
+        }
         const data = res.ok ? await res.json() : {};
         document.getElementById('settingExternalIP').value = data.external_ip || '';
         document.getElementById('settingProbeTarget').value = data.probe_target || '';
         document.getElementById('settingSkipCertVerify').checked = data.skip_cert_verify || false;
         document.getElementById('settingsError').classList.remove('show');
+        loadAutoReloadSetting();
+        await loadProxyAuthSettings();
+        updateProxyAuthUI();
         document.getElementById('settingsOverlay').classList.add('show');
       } catch (err) {
         console.error('Failed to load settings', err);
@@ -1959,6 +2136,70 @@
       event.preventDefault();
       const errorEl = document.getElementById('settingsError');
       errorEl.classList.remove('show');
+
+      const autoReloadEl = document.getElementById('settingAutoReload');
+      const autoReload = !!(autoReloadEl && autoReloadEl.checked);
+
+      const settingsPayload = {
+        external_ip: document.getElementById('settingExternalIP').value.trim(),
+        probe_target: document.getElementById('settingProbeTarget').value.trim(),
+        skip_cert_verify: document.getElementById('settingSkipCertVerify').checked
+      };
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settingsPayload)
+        });
+
+        if (res.status === 401) {
+          showToast('请先登录', 'error');
+          document.getElementById('loginOverlay').classList.add('show');
+          return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          errorEl.textContent = data.error || '保存失败';
+          errorEl.classList.add('show');
+          return;
+        }
+
+        const authResult = await saveProxyAuthSettings();
+        if (authResult.res.status === 401) {
+          showToast('请先登录', 'error');
+          document.getElementById('loginOverlay').classList.add('show');
+          return;
+        }
+        if (!authResult.res.ok) {
+          errorEl.textContent = authResult.data.error || '保存失败';
+          errorEl.classList.add('show');
+          return;
+        }
+
+        const reloaded = autoReload && authResult.data && authResult.data.need_reload === false;
+        if (reloaded) {
+          showToast('设置已保存并已重载生效', 'success');
+        } else {
+          showToast('设置已保存，请点击重载使配置生效', 'success');
+        }
+
+        const lp = document.getElementById('proxyAuthListenerPassword');
+        const mp = document.getElementById('proxyAuthMultiPortPassword');
+        if (lp) lp.value = '';
+        if (mp) mp.value = '';
+
+        hideSettingsModal();
+        setTimeout(() => {
+          refresh();
+          loadConfigNodes();
+        }, 1000);
+      } catch (err) {
+        errorEl.textContent = '保存失败: ' + err.message;
+        errorEl.classList.add('show');
+      }
+      return;
 
       const payload = {
         external_ip: document.getElementById('settingExternalIP').value.trim(),
