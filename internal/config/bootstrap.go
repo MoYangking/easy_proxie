@@ -61,8 +61,8 @@ management:
 listener:
   address: 0.0.0.0
   port: 2323
-  username: username
-  password: password
+  username: ""
+  password: ""
 
 pool:
   mode: sequential
@@ -72,8 +72,8 @@ pool:
 multi_port:
   address: 0.0.0.0
   base_port: 24000
-  username: mpuser
-  password: mppass
+  username: ""
+  password: ""
 
 # 订阅链接列表（可在 WebUI 中导入/管理）
 subscriptions: []

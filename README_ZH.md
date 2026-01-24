@@ -80,8 +80,8 @@ management:
 listener:
   address: 0.0.0.0
   port: 2323
-  username: username
-  password: password
+  username: ""                # 代理认证用户名，为空则不需要认证（可选）
+  password: ""                # 代理认证密码，为空则不需要认证（可选）
 
 # 节点池配置
 pool:
@@ -93,8 +93,8 @@ pool:
 multi_port:
   address: 0.0.0.0
   base_port: 24000            # 起始端口，节点依次递增
-  username: mpuser
-  password: mppass
+  username: ""                # 代理认证用户名，为空则不需要认证（可选）
+  password: ""                # 代理认证密码，为空则不需要认证（可选）
 ```
 
 ### 运行模式详解
@@ -109,8 +109,8 @@ mode: pool
 listener:
   address: 0.0.0.0
   port: 2323
-  username: user
-  password: pass
+  username: ""  # 可选
+  password: ""  # 可选
 
 pool:
   mode: sequential  # sequential (顺序) 或 random (随机)
@@ -120,7 +120,7 @@ pool:
 
 **适用场景：** 自动故障转移、负载均衡
 
-**使用方式：** 配置代理为 `http://user:pass@localhost:2323`
+**使用方式：** 配置代理为 `http://localhost:2323`（若启用认证则为 `http://user:pass@localhost:2323`）
 
 #### Multi-Port 模式（多端口）
 
@@ -142,8 +142,8 @@ mode: multi-port
 multi_port:
   address: 0.0.0.0
   base_port: 24000  # 端口从这里开始自动递增
-  username: user
-  password: pass
+  username: ""  # 可选
+  password: ""  # 可选
 
 # 使用 nodes_file 简化配置
 nodes_file: nodes.txt
@@ -157,11 +157,11 @@ nodes_file: nodes.txt
 🔌 Multi-Port Mode (3 nodes):
 
    [24000] 台湾节点
-       http://user:pass@0.0.0.0:24000
+       http://0.0.0.0:24000
    [24001] 香港节点
-       http://user:pass@0.0.0.0:24001
+       http://0.0.0.0:24001
    [24002] 美国节点
-       http://user:pass@0.0.0.0:24002
+       http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -179,14 +179,14 @@ mode: hybrid
 listener:
   address: 0.0.0.0
   port: 2323           # 节点池入口
-  username: user
-  password: pass
+  username: ""  # 可选
+  password: ""  # 可选
 
 multi_port:
   address: 0.0.0.0
   base_port: 24000     # 多端口起始端口
-  username: mpuser
-  password: mppass
+  username: ""  # 可选
+  password: ""  # 可选
 
 pool:
   mode: balance        # sequential (顺序)、random (随机) 或 balance (负载均衡)
@@ -200,7 +200,7 @@ pool:
 📡 Proxy Links:
 ═══════════════════════════════════════════════════════════════
 🌐 Pool Entry Point:
-   http://user:pass@0.0.0.0:2323
+   http://0.0.0.0:2323
 
    Nodes in pool (3):
    • 台湾节点
@@ -210,11 +210,11 @@ pool:
 🔌 Multi-Port Entry Points (3 nodes):
 
    [24000] 台湾节点
-       http://mpuser:mppass@0.0.0.0:24000
+       http://0.0.0.0:24000
    [24001] 香港节点
-       http://mpuser:mppass@0.0.0.0:24001
+       http://0.0.0.0:24001
    [24002] 美国节点
-       http://mpuser:mppass@0.0.0.0:24002
+       http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -334,7 +334,7 @@ hysteria2://password@server:port?sni=example.com&insecure=0&obfs=salamander&obfs
 - 失败次数统计
 - 手动探测延迟
 - 解除节点拉黑
-- **一键导出节点**: 导出所有可用节点的代理池 URI（格式：`http://user:pass@host:port`）
+- **一键导出节点**: 导出所有可用节点的代理池 URI（格式：`http://host:port`；若启用认证则为 `http://user:pass@host:port`）
 - **设置**: 点击齿轮图标修改 `external_ip` 和 `probe_target`（立即保存生效）
 
 ### WebUI 设置

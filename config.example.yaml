@@ -9,8 +9,8 @@ management:
 listener:
   address: 0.0.0.0
   port: 2323
-  username: username
-  password: password
+  username: ""  # 代理认证用户名，为空则不需要认证（可选）
+  password: ""  # 代理认证密码，为空则不需要认证（可选）
 pool:
   mode: sequential
   failure_threshold: 3
@@ -18,8 +18,8 @@ pool:
 multi_port:
   address: 0.0.0.0
   base_port: 24000
-  username: mpuser
-  password: mppass
+  username: ""  # 代理认证用户名，为空则不需要认证（可选）
+  password: ""  # 代理认证密码，为空则不需要认证（可选）
 
 # ═══════════════════════════════════════════════════════════════
 # 节点配置方式（三选一或混合使用）

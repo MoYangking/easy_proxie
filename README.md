@@ -80,8 +80,8 @@ management:
 listener:
   address: 0.0.0.0
   port: 2323
-  username: username
-  password: password
+  username: ""               # Proxy auth username (optional, empty = no auth)
+  password: ""               # Proxy auth password (optional, empty = no auth)
 
 # Pool Settings
 pool:
@@ -93,8 +93,8 @@ pool:
 multi_port:
   address: 0.0.0.0
   base_port: 24000            # Starting port, auto-increment
-  username: mpuser
-  password: mppass
+  username: ""                # Proxy auth username (optional, empty = no auth)
+  password: ""                # Proxy auth password (optional, empty = no auth)
 ```
 
 ### Operating Modes
@@ -109,8 +109,8 @@ mode: pool
 listener:
   address: 0.0.0.0
   port: 2323
-  username: user
-  password: pass
+  username: ""  # optional
+  password: ""  # optional
 
 pool:
   mode: sequential  # sequential or random
@@ -120,7 +120,7 @@ pool:
 
 **Use Case:** Automatic failover, load balancing
 
-**Usage:** Set proxy to `http://user:pass@localhost:2323`
+**Usage:** Set proxy to `http://localhost:2323` (or `http://user:pass@localhost:2323` if auth enabled)
 
 #### Multi-Port Mode
 
@@ -142,8 +142,8 @@ mode: multi-port
 multi_port:
   address: 0.0.0.0
   base_port: 24000  # Ports auto-increment from here
-  username: user
-  password: pass
+  username: ""  # optional
+  password: ""  # optional
 
 nodes_file: nodes.txt
 ```
@@ -156,11 +156,11 @@ nodes_file: nodes.txt
 🔌 Multi-Port Mode (3 nodes):
 
    [24000] Taiwan Node
-       http://user:pass@0.0.0.0:24000
+       http://0.0.0.0:24000
    [24001] Hong Kong Node
-       http://user:pass@0.0.0.0:24001
+       http://0.0.0.0:24001
    [24002] US Node
-       http://user:pass@0.0.0.0:24002
+       http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -178,14 +178,14 @@ mode: hybrid
 listener:
   address: 0.0.0.0
   port: 2323           # Pool entry point
-  username: user
-  password: pass
+  username: ""  # optional
+  password: ""  # optional
 
 multi_port:
   address: 0.0.0.0
   base_port: 24000     # Multi-port starting port
-  username: mpuser
-  password: mppass
+  username: ""  # optional
+  password: ""  # optional
 
 pool:
   mode: balance        # sequential, random, or balance
@@ -199,7 +199,7 @@ pool:
 📡 Proxy Links:
 ═══════════════════════════════════════════════════════════════
 🌐 Pool Entry Point:
-   http://user:pass@0.0.0.0:2323
+   http://0.0.0.0:2323
 
    Nodes in pool (3):
    • Taiwan Node
@@ -209,11 +209,11 @@ pool:
 🔌 Multi-Port Entry Points (3 nodes):
 
    [24000] Taiwan Node
-       http://mpuser:mppass@0.0.0.0:24000
+       http://0.0.0.0:24000
    [24001] Hong Kong Node
-       http://mpuser:mppass@0.0.0.0:24001
+       http://0.0.0.0:24001
    [24002] US Node
-       http://mpuser:mppass@0.0.0.0:24002
+       http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -333,7 +333,7 @@ Access `http://localhost:9090` to view:
 - Failure count
 - Manual latency probing
 - Release blacklisted nodes
-- **One-click Export**: Export all available nodes as proxy URIs (`http://user:pass@host:port`)
+- **One-click Export**: Export all available nodes as proxy URIs (`http://host:port`, or `http://user:pass@host:port` if auth enabled)
 - **Settings**: Click the gear icon to modify `external_ip` and `probe_target` (changes saved immediately)
 
 ### WebUI Settings

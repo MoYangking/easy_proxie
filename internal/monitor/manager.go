@@ -395,10 +395,20 @@ func (m *Manager) Probe(ctx context.Context, tag string) (time.Duration, error) 
 		return 0, errors.New("probe not available for this node")
 	}
 	latency, err := e.probe(ctx)
+	now := time.Now()
+	e.mu.Lock()
+	e.initialCheckDone = true
 	if err != nil {
+		e.available = false
+		e.lastError = err.Error()
+		e.lastFail = now
+		e.mu.Unlock()
 		return 0, err
 	}
-	e.recordProbeLatency(latency)
+	e.available = true
+	e.lastOK = now
+	e.lastProbe = latency
+	e.mu.Unlock()
 	return latency, nil
 }
 
