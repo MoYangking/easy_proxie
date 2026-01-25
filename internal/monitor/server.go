@@ -114,7 +114,6 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	// Serve static files
 	fs := http.FileServer(http.FS(embeddedFS))
 	mux.Handle("/assets/", fs)
-	mux.HandleFunc("/", s.handleIndex)
 	
 	s.srv = &http.Server{Addr: cfg.Listen, Handler: mux}
 	return s
