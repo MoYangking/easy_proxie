@@ -519,9 +519,12 @@ func httpProbe(conn net.Conn, host string) (time.Duration, error) {
 func httpIPProbe(conn net.Conn, host string) (string, error) {
 	// Build HTTP request
 	req := fmt.Sprintf("GET / HTTP/1.1
-Host: %s
-Connection: close
-User-Agent: curl/7.68.0
+" +
+		"Host: %s
+" +
+		"Connection: close
+" +
+		"User-Agent: curl/7.68.0
 
 ", host)
 
