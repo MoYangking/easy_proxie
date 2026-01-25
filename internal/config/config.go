@@ -960,8 +960,8 @@ func (c *Config) Save() error {
 	return c.SaveNodes()
 }
 
-// SaveSettings persists only config settings (external_ip, probe_target, skip_cert_verify)
-// without touching nodes.txt. Use this for settings API updates.
+// SaveSettings persists config settings (external_ip, probe_target, skip_cert_verify, pool mode,
+// listener/multi-port auth) without touching nodes.txt. Use this for settings API updates.
 func (c *Config) SaveSettings() error {
 	if c == nil {
 		return errors.New("config is nil")
@@ -985,6 +985,7 @@ func (c *Config) SaveSettings() error {
 	saveCfg.ExternalIP = c.ExternalIP
 	saveCfg.Management.ProbeTarget = c.Management.ProbeTarget
 	saveCfg.SkipCertVerify = c.SkipCertVerify
+	saveCfg.Pool.Mode = c.Pool.Mode
 	saveCfg.Listener.Username = c.Listener.Username
 	saveCfg.Listener.Password = c.Listener.Password
 	saveCfg.MultiPort.Username = c.MultiPort.Username

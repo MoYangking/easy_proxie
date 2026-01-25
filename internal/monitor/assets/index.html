@@ -901,7 +901,7 @@
           <span class="status-dot"></span>
           <span id="lastUpdate">正在加载...</span>
         </div>
-        <button class="btn btn-secondary" onclick="showSettingsModal()" style="padding: 0; border-radius: 50%; width: 36px; height: 36px; min-width: 36px; display: flex; align-items: center; justify-content: center;" title="系统设置">
+        <button class="btn btn-secondary" onclick="switchTab('settings')" style="padding: 0; border-radius: 50%; width: 36px; height: 36px; min-width: 36px; display: flex; align-items: center; justify-content: center;" title="系统设置">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"></circle>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -913,6 +913,7 @@
     <!-- Tab 切换 -->
     <div class="tabs">
       <button class="tab active" onclick="switchTab('monitor')">📊 节点监控</button>
+      <button class="tab" onclick="switchTab('settings')">🛠 系统设置</button>
       <button class="tab" onclick="switchTab('manage')">⚙️ 节点管理</button>
       <button class="tab" onclick="switchTab('subscription')">🔗 订阅管理</button>
       <button class="tab" onclick="switchTab('debug')">🐞 调试面板</button>
@@ -988,6 +989,102 @@
       <p>请在配置文件中添加代理节点</p>
     </div>
     </div><!-- end monitorTab -->
+
+    <!-- 系统设置页面 -->
+    <div id="settingsTab" class="tab-content">
+      <div class="manage-header">
+        <h2>系统设置</h2>
+        <p class="manage-desc">修改后通常需要重载生效（可开启“保存后自动重载”）</p>
+      </div>
+
+      <form class="login-form" onsubmit="handleSettingsSave(event)" style="max-width: 860px; margin: 0 auto;">
+        <div class="form-group">
+          <label class="form-label" for="settingExternalIP">外部 IP 地址</label>
+          <input type="text" id="settingExternalIP" class="form-input" placeholder="例如：1.2.3.4 或 example.com" />
+          <p class="form-help">导出节点时用于替换 0.0.0.0，留空则使用默认地址</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="settingProbeTarget">探测目标</label>
+          <input type="text" id="settingProbeTarget" class="form-input" placeholder="例如：www.apple.com:80" />
+          <p class="form-help">健康检查时使用的目标地址，格式：host:port</p>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+          <label class="form-label" for="settingSkipCertVerify" style="margin: 0; flex: 1;">跳过 SSL 证书验证</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="settingSkipCertVerify" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="form-help" style="margin-top: -8px;">启用后所有节点将忽略 SSL 证书错误，修改后需重载生效</p>
+
+        <div id="poolModeSection" class="form-group" style="margin-top: 8px;">
+          <label class="form-label" for="settingPoolMode">节点池调度策略（Pool 入口）</label>
+          <select id="settingPoolMode" class="form-input">
+            <option value="balance">负载均衡（最少活跃连接）</option>
+            <option value="random">随机选择</option>
+            <option value="sequential">轮询（顺序）</option>
+          </select>
+          <p class="form-help">仅在 pool/hybrid 模式下生效：每个新连接按该策略选择节点，修改后需重载生效</p>
+        </div>
+        <p class="form-help" id="poolModeUnavailable" style="display:none;margin-top:-8px;">当前为 multi-port 模式（无 Pool 入口），该选项不生效</p>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+          <label class="form-label" for="settingAutoReload" style="margin: 0; flex: 1;">保存后自动重载</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="settingAutoReload" onchange="persistAutoReloadSetting()" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="form-help" style="margin-top: -8px;">开启后保存将自动重载配置（会中断现有连接）</p>
+
+        <div class="form-group" style="margin-top: 8px;">
+          <label class="form-label" style="margin-bottom: 6px;">代理认证</label>
+          <p class="form-help" style="margin: 0;">
+            当前模式：<span id="proxyAuthModeText">-</span>（关闭开关表示无需认证；密码留空表示保持不变）
+          </p>
+        </div>
+
+        <div id="proxyAuthListenerSection">
+          <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+            <label class="form-label" for="proxyAuthListenerEnabled" style="margin: 0; flex: 1;">Pool 入口需要认证</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proxyAuthListenerEnabled" onchange="updateProxyAuthUI()" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group" id="proxyAuthListenerFields">
+            <label class="form-label" for="proxyAuthListenerUsername">用户名</label>
+            <input type="text" id="proxyAuthListenerUsername" class="form-input" placeholder="请输入用户名" />
+            <label class="form-label" for="proxyAuthListenerPassword">密码</label>
+            <input type="password" id="proxyAuthListenerPassword" class="form-input" placeholder="留空表示保持不变" autocomplete="new-password" />
+          </div>
+        </div>
+
+        <div id="proxyAuthMultiPortSection">
+          <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+            <label class="form-label" for="proxyAuthMultiPortEnabled" style="margin: 0; flex: 1;">Multi-Port 入口需要认证</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proxyAuthMultiPortEnabled" onchange="updateProxyAuthUI()" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group" id="proxyAuthMultiPortFields">
+            <label class="form-label" for="proxyAuthMultiPortUsername">用户名</label>
+            <input type="text" id="proxyAuthMultiPortUsername" class="form-input" placeholder="请输入用户名" />
+            <label class="form-label" for="proxyAuthMultiPortPassword">密码</label>
+            <input type="password" id="proxyAuthMultiPortPassword" class="form-input" placeholder="留空表示保持不变" autocomplete="new-password" />
+          </div>
+        </div>
+
+        <div id="settingsError" class="login-error"></div>
+        <div class="modal-buttons">
+          <button type="button" class="btn btn-secondary" onclick="switchTab('monitor')">返回监控</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div><!-- end settingsTab -->
 
     <!-- 节点管理页面 -->
     <div id="manageTab" class="tab-content">
@@ -1177,90 +1274,6 @@
         <div class="modal-buttons">
           <button type="button" class="btn btn-secondary" onclick="hideNodeModal()">取消</button>
           <button type="submit" class="btn btn-primary" id="nodeSubmitBtn">添加</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- 设置弹窗 -->
-  <div id="settingsOverlay" class="login-overlay">
-    <div class="login-modal">
-      <div class="login-header">
-        <h2>⚙️ 系统设置</h2>
-        <p>配置全局选项</p>
-      </div>
-      <form class="login-form" onsubmit="handleSettingsSave(event)">
-        <div class="form-group">
-          <label class="form-label" for="settingExternalIP">外部 IP 地址</label>
-          <input type="text" id="settingExternalIP" class="form-input" placeholder="例如：1.2.3.4 或 example.com" />
-          <p class="form-help">导出节点时用于替换 0.0.0.0，留空则使用默认地址</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="settingProbeTarget">探测目标</label>
-          <input type="text" id="settingProbeTarget" class="form-input" placeholder="例如：www.apple.com:80" />
-          <p class="form-help">健康检查时使用的目标地址，格式：host:port</p>
-        </div>
-        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-          <label class="form-label" for="settingSkipCertVerify" style="margin: 0; flex: 1;">跳过 SSL 证书验证</label>
-          <label class="toggle-switch">
-            <input type="checkbox" id="settingSkipCertVerify" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <p class="form-help" style="margin-top: -8px;">启用后所有节点将忽略 SSL 证书错误，修改后需重载生效</p>
-
-        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-          <label class="form-label" for="settingAutoReload" style="margin: 0; flex: 1;">保存后自动重载</label>
-          <label class="toggle-switch">
-            <input type="checkbox" id="settingAutoReload" onchange="persistAutoReloadSetting()" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <p class="form-help" style="margin-top: -8px;">开启后保存将自动重载配置（会中断现有连接）</p>
-
-        <div class="form-group" style="margin-top: 8px;">
-          <label class="form-label" style="margin-bottom: 6px;">代理认证</label>
-          <p class="form-help" style="margin: 0;">
-            当前模式：<span id="proxyAuthModeText">-</span>（关闭开关表示无需认证；密码留空表示保持不变）
-          </p>
-        </div>
-
-        <div id="proxyAuthListenerSection">
-          <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-            <label class="form-label" for="proxyAuthListenerEnabled" style="margin: 0; flex: 1;">Pool 入口需要认证</label>
-            <label class="toggle-switch">
-              <input type="checkbox" id="proxyAuthListenerEnabled" onchange="updateProxyAuthUI()" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="form-group" id="proxyAuthListenerFields">
-            <label class="form-label" for="proxyAuthListenerUsername">用户名</label>
-            <input type="text" id="proxyAuthListenerUsername" class="form-input" placeholder="请输入用户名" />
-            <label class="form-label" for="proxyAuthListenerPassword">密码</label>
-            <input type="password" id="proxyAuthListenerPassword" class="form-input" placeholder="留空表示保持不变" autocomplete="new-password" />
-          </div>
-        </div>
-
-        <div id="proxyAuthMultiPortSection">
-          <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-            <label class="form-label" for="proxyAuthMultiPortEnabled" style="margin: 0; flex: 1;">Multi-Port 入口需要认证</label>
-            <label class="toggle-switch">
-              <input type="checkbox" id="proxyAuthMultiPortEnabled" onchange="updateProxyAuthUI()" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="form-group" id="proxyAuthMultiPortFields">
-            <label class="form-label" for="proxyAuthMultiPortUsername">用户名</label>
-            <input type="text" id="proxyAuthMultiPortUsername" class="form-input" placeholder="请输入用户名" />
-            <label class="form-label" for="proxyAuthMultiPortPassword">密码</label>
-            <input type="password" id="proxyAuthMultiPortPassword" class="form-input" placeholder="留空表示保持不变" autocomplete="new-password" />
-          </div>
-        </div>
-
-        <div id="settingsError" class="login-error"></div>
-        <div class="modal-buttons">
-          <button type="button" class="btn btn-secondary" onclick="hideSettingsModal()">取消</button>
-          <button type="submit" class="btn btn-primary">保存</button>
         </div>
       </form>
     </div>
@@ -1999,6 +2012,15 @@
       el.checked = saved === '1' || saved === 'true';
     }
 
+    function updatePoolModeUI() {
+      const mode = (proxyAuthMode || '').toLowerCase();
+      const showPoolMode = mode === '' || mode === 'pool' || mode === 'hybrid';
+      const section = document.getElementById('poolModeSection');
+      const unavailable = document.getElementById('poolModeUnavailable');
+      if (section) section.style.display = showPoolMode ? 'block' : 'none';
+      if (unavailable) unavailable.style.display = (!showPoolMode && mode !== '') ? 'block' : 'none';
+    }
+
     function updateProxyAuthUI() {
       const mode = (proxyAuthMode || '').toLowerCase();
       const showListener = mode === '' || mode === 'pool' || mode === 'hybrid';
@@ -2020,6 +2042,8 @@
       if (mpEnabled && mpFields) {
         mpFields.style.display = mpEnabled.checked ? 'block' : 'none';
       }
+
+      updatePoolModeUI();
     }
 
     async function loadProxyAuthSettings() {
@@ -2060,11 +2084,8 @@
       }
     }
 
-    function buildProxyAuthPayload() {
-      const autoReloadEl = document.getElementById('settingAutoReload');
-      const reload = !!(autoReloadEl && autoReloadEl.checked);
-
-      const payload = { reload };
+    function buildProxyAuthPayload(reload) {
+      const payload = { reload: !!reload };
       const mode = (proxyAuthMode || '').toLowerCase();
       const includeListener = mode === '' || mode === 'pool' || mode === 'hybrid';
       const includeMultiPort = mode === '' || mode === 'multi-port' || mode === 'multi_port' || mode === 'hybrid';
@@ -2094,18 +2115,21 @@
       return payload;
     }
 
-    async function saveProxyAuthSettings() {
+    async function saveProxyAuthSettings(reload) {
       const res = await fetch('/api/proxy/auth', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildProxyAuthPayload())
+        body: JSON.stringify(buildProxyAuthPayload(reload))
       });
       let data = {};
       try { data = await res.json(); } catch (e) {}
       return { res, data };
     }
 
-    async function showSettingsModal() {
+    async function loadSettingsTab() {
+      const errorEl = document.getElementById('settingsError');
+      if (errorEl) errorEl.classList.remove('show');
+
       try {
         const res = await fetch('/api/settings');
         if (res.status === 401) {
@@ -2117,19 +2141,21 @@
         document.getElementById('settingExternalIP').value = data.external_ip || '';
         document.getElementById('settingProbeTarget').value = data.probe_target || '';
         document.getElementById('settingSkipCertVerify').checked = data.skip_cert_verify || false;
-        document.getElementById('settingsError').classList.remove('show');
+        const poolModeEl = document.getElementById('settingPoolMode');
+        if (poolModeEl) {
+          const v = String(data.pool_mode || '').toLowerCase();
+          poolModeEl.value = (v === 'random' || v === 'balance' || v === 'sequential') ? v : 'sequential';
+        }
         loadAutoReloadSetting();
         await loadProxyAuthSettings();
         updateProxyAuthUI();
-        document.getElementById('settingsOverlay').classList.add('show');
       } catch (err) {
         console.error('Failed to load settings', err);
-        document.getElementById('settingsOverlay').classList.add('show');
+        if (errorEl) {
+          errorEl.textContent = '加载失败: ' + err.message;
+          errorEl.classList.add('show');
+        }
       }
-    }
-
-    function hideSettingsModal() {
-      document.getElementById('settingsOverlay').classList.remove('show');
     }
 
     async function handleSettingsSave(event) {
@@ -2140,11 +2166,17 @@
       const autoReloadEl = document.getElementById('settingAutoReload');
       const autoReload = !!(autoReloadEl && autoReloadEl.checked);
 
+      const poolModeEl = document.getElementById('settingPoolMode');
       const settingsPayload = {
         external_ip: document.getElementById('settingExternalIP').value.trim(),
         probe_target: document.getElementById('settingProbeTarget').value.trim(),
         skip_cert_verify: document.getElementById('settingSkipCertVerify').checked
       };
+      const mode = (proxyAuthMode || '').toLowerCase();
+      const applyPoolMode = mode === '' || mode === 'pool' || mode === 'hybrid';
+      if (applyPoolMode && poolModeEl) {
+        settingsPayload.pool_mode = poolModeEl.value;
+      }
 
       try {
         const res = await fetch('/api/settings', {
@@ -2166,7 +2198,7 @@
           return;
         }
 
-        const authResult = await saveProxyAuthSettings();
+        const authResult = await saveProxyAuthSettings(false);
         if (authResult.res.status === 401) {
           showToast('请先登录', 'error');
           document.getElementById('loginOverlay').classList.add('show');
@@ -2178,10 +2210,18 @@
           return;
         }
 
-        const reloaded = autoReload && authResult.data && authResult.data.need_reload === false;
-        if (reloaded) {
-          showToast('设置已保存并已重载生效', 'success');
-        } else {
+        let reloaded = false;
+        if (autoReload) {
+          const reloadRes = await fetch('/api/reload', { method: 'POST' });
+          const reloadData = await reloadRes.json().catch(() => ({}));
+          if (!reloadRes.ok) {
+            showToast('设置已保存，但重载失败: ' + (reloadData.error || '未知错误'), 'error');
+          } else {
+            reloaded = true;
+            showToast(reloadData.message || '设置已保存并已重载生效', 'success');
+          }
+        }
+        if (!reloaded) {
           showToast('设置已保存，请点击重载使配置生效', 'success');
         }
 
@@ -2190,42 +2230,10 @@
         if (lp) lp.value = '';
         if (mp) mp.value = '';
 
-        hideSettingsModal();
         setTimeout(() => {
           refresh();
           loadConfigNodes();
         }, 1000);
-      } catch (err) {
-        errorEl.textContent = '保存失败: ' + err.message;
-        errorEl.classList.add('show');
-      }
-      return;
-
-      const payload = {
-        external_ip: document.getElementById('settingExternalIP').value.trim(),
-        probe_target: document.getElementById('settingProbeTarget').value.trim(),
-        skip_cert_verify: document.getElementById('settingSkipCertVerify').checked
-      };
-
-      try {
-        const res = await fetch('/api/settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-          if (data.need_reload) {
-            showToast('设置已保存，部分选项需重载生效', 'success');
-          } else {
-            showToast('设置已保存', 'success');
-          }
-          hideSettingsModal();
-        } else {
-          errorEl.textContent = data.error || '保存失败';
-          errorEl.classList.add('show');
-        }
       } catch (err) {
         errorEl.textContent = '保存失败: ' + err.message;
         errorEl.classList.add('show');
@@ -2397,7 +2405,9 @@
       document.querySelector(`.tab[onclick="switchTab('${tabName}')"]`).classList.add('active');
       document.getElementById(tabName + 'Tab').classList.add('active');
 
-      if (tabName === 'manage') {
+      if (tabName === 'settings') {
+        loadSettingsTab();
+      } else if (tabName === 'manage') {
         loadConfigNodes();
       } else if (tabName === 'subscription') {
         loadSubscriptionConfig();

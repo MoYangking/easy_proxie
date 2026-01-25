@@ -158,7 +158,7 @@ func (s *Server) getSettings() (externalIP, probeTarget string, skipCertVerify b
 }
 
 // updateSettings updates dynamic settings and persists to config file.
-func (s *Server) updateSettings(externalIP, probeTarget string, skipCertVerify bool) error {
+func (s *Server) updateSettings(externalIP, probeTarget string, skipCertVerify bool, poolMode *string) error {
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 
@@ -173,6 +173,9 @@ func (s *Server) updateSettings(externalIP, probeTarget string, skipCertVerify b
 	s.cfgSrc.ExternalIP = externalIP
 	s.cfgSrc.Management.ProbeTarget = probeTarget
 	s.cfgSrc.SkipCertVerify = skipCertVerify
+	if poolMode != nil {
+		s.cfgSrc.Pool.Mode = *poolMode
+	}
 
 	if err := s.cfgSrc.SaveSettings(); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
@@ -682,16 +685,27 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		extIP, probeTarget, skipCertVerify := s.getSettings()
+		var mode string
+		var poolMode string
+		s.cfgMu.RLock()
+		if s.cfgSrc != nil {
+			mode = s.cfgSrc.Mode
+			poolMode = s.cfgSrc.Pool.Mode
+		}
+		s.cfgMu.RUnlock()
 		writeJSON(w, map[string]any{
+			"mode":             mode,
 			"external_ip":      extIP,
 			"probe_target":     probeTarget,
 			"skip_cert_verify": skipCertVerify,
+			"pool_mode":        poolMode,
 		})
 	case http.MethodPut:
 		var req struct {
-			ExternalIP     string `json:"external_ip"`
-			ProbeTarget    string `json:"probe_target"`
-			SkipCertVerify bool   `json:"skip_cert_verify"`
+			ExternalIP     string  `json:"external_ip"`
+			ProbeTarget    string  `json:"probe_target"`
+			SkipCertVerify bool    `json:"skip_cert_verify"`
+			PoolMode       *string `json:"pool_mode,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -702,17 +716,42 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		extIP := strings.TrimSpace(req.ExternalIP)
 		probeTarget := strings.TrimSpace(req.ProbeTarget)
 
-		if err := s.updateSettings(extIP, probeTarget, req.SkipCertVerify); err != nil {
+		var poolMode *string
+		if req.PoolMode != nil {
+			val := strings.ToLower(strings.TrimSpace(*req.PoolMode))
+			switch val {
+			case "", "sequential":
+				val = "sequential"
+			case "random":
+				val = "random"
+			case "balance":
+				val = "balance"
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]any{"error": "pool_mode 只支持 sequential/random/balance"})
+				return
+			}
+			poolMode = &val
+		}
+
+		if err := s.updateSettings(extIP, probeTarget, req.SkipCertVerify, poolMode); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			writeJSON(w, map[string]any{"error": err.Error()})
 			return
 		}
+		var currentPoolMode string
+		s.cfgMu.RLock()
+		if s.cfgSrc != nil {
+			currentPoolMode = s.cfgSrc.Pool.Mode
+		}
+		s.cfgMu.RUnlock()
 
 		writeJSON(w, map[string]any{
 			"message":          "设置已保存",
 			"external_ip":      extIP,
 			"probe_target":     probeTarget,
 			"skip_cert_verify": req.SkipCertVerify,
+			"pool_mode":        currentPoolMode,
 			"need_reload":      true,
 		})
 	default:
