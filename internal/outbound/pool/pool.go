@@ -525,7 +525,8 @@ func httpIPProbe(conn net.Conn, host string) (string, error) {
 		"Connection: close
 " +
 		"User-Agent: curl/7.68.0
-
+" +
+		"
 ", host)
 
 	// Try to set write deadline
