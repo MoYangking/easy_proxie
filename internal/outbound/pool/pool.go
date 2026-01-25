@@ -4,14 +4,14 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"io"
-	"net/http"
 
 	"easy_proxies/internal/monitor"
 
@@ -135,8 +135,8 @@ func newPool(ctx context.Context, _ adapter.Router, logger log.ContextLogger, ta
 				if probeFn := p.makeProbeByTagFunc(memberTag); probeFn != nil {
 					entry.SetProbe(probeFn)
 				}
-				if probeIPFn := p.makeProbeIPByTagFunc(memberTag); probeIPFn != nil {
-					entry.SetProbeIP(probeIPFn)
+				if ipProbeFn := p.makeExitIPProbeByTagFunc(memberTag); ipProbeFn != nil {
+					entry.SetExitIPProbe(ipProbeFn)
 				}
 			} else {
 				logger.Warn("failed to register node: ", memberTag)
@@ -229,8 +229,8 @@ func (p *poolOutbound) initializeMembersLocked() error {
 				if probe := p.makeProbeFunc(member); probe != nil {
 					entry.SetProbe(probe)
 				}
-				if probeIP := p.makeProbeIPFunc(member); probeIP != nil {
-					entry.SetProbeIP(probeIP)
+				if ipProbe := p.makeExitIPProbeFunc(member); ipProbe != nil {
+					entry.SetExitIPProbe(ipProbe)
 				}
 			}
 		}
@@ -515,37 +515,85 @@ func httpProbe(conn net.Conn, host string) (time.Duration, error) {
 	return ttfb, nil
 }
 
-// httpIPProbe performs an HTTP request to fetch IP address.
-func httpIPProbe(conn net.Conn, host string) (string, error) {
-	// Build HTTP request
-	req := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: curl/7.68.0\r\n\r\n", host)
+var exitIPProbeTargets = []struct {
+	Host string
+	Port uint16
+	Path string
+}{
+	{Host: "api.ipify.org", Port: 80, Path: "/?format=text"},
+	{Host: "checkip.amazonaws.com", Port: 80, Path: "/"},
+	{Host: "icanhazip.com", Port: 80, Path: "/"},
+	{Host: "ip.sb", Port: 80, Path: "/"},
+}
 
-	// Try to set write deadline
-	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+func fetchExitIP(ctx context.Context, dial func(ctx context.Context, dst M.Socksaddr) (net.Conn, error)) (string, error) {
+	var lastErr error
+	for _, target := range exitIPProbeTargets {
+		dst := M.ParseSocksaddrHostPort(target.Host, target.Port)
+		conn, err := dial(ctx, dst)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		ip, err := readExitIPFromConn(conn, target.Host, target.Path)
+		_ = conn.Close()
+		if err == nil {
+			return ip, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no exit ip probe target available")
+	}
+	return "", lastErr
+}
 
-	// Send HTTP request
+func readExitIPFromConn(conn net.Conn, host, path string) (string, error) {
+	if path == "" {
+		path = "/"
+	}
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	req := fmt.Sprintf(
+		"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: easy_proxies\r\nAccept: */*\r\n\r\n",
+		path,
+		host,
+	)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		return "", fmt.Errorf("write request: %w", err)
 	}
 
-	// Try to set read deadline
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-
-	// Read response
 	reader := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(reader, nil)
+	resp, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("unexpected status: %s", resp.Status)
+	}
 
-	// Read body
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	if err != nil {
 		return "", fmt.Errorf("read body: %w", err)
 	}
-
-	return strings.TrimSpace(string(body)), nil
+	text := strings.TrimSpace(string(body))
+	if ip := net.ParseIP(text); ip != nil {
+		return ip.String(), nil
+	}
+	for _, token := range strings.FieldsFunc(text, func(r rune) bool {
+		switch r {
+		case ' ', '\n', '\r', '\t', '"', '\'', ',', ';', '{', '}', '[', ']', ':':
+			return true
+		default:
+			return false
+		}
+	}) {
+		if ip := net.ParseIP(token); ip != nil {
+			return ip.String(), nil
+		}
+	}
+	return "", fmt.Errorf("invalid ip response: %q", text)
 }
 
 func (p *poolOutbound) makeProbeFunc(member *memberState) func(ctx context.Context) (time.Duration, error) {
@@ -582,6 +630,14 @@ func (p *poolOutbound) makeProbeFunc(member *memberState) func(ctx context.Conte
 			member.entry.RecordSuccessWithLatency(duration)
 		}
 		return duration, nil
+	}
+}
+
+func (p *poolOutbound) makeExitIPProbeFunc(member *memberState) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		return fetchExitIP(ctx, func(ctx context.Context, dst M.Socksaddr) (net.Conn, error) {
+			return member.outbound.DialContext(ctx, N.NetworkTCP, dst)
+		})
 	}
 }
 
@@ -646,24 +702,7 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 	}
 }
 
-func (p *poolOutbound) makeProbeIPFunc(member *memberState) func(ctx context.Context) (string, error) {
-	return func(ctx context.Context) (string, error) {
-		// Use a reliable IP echo service
-		targetHost := "api.ipify.org"
-		targetPort := uint16(80)
-		destination := M.ParseSocksaddrHostPort(targetHost, targetPort)
-
-		conn, err := member.outbound.DialContext(ctx, N.NetworkTCP, destination)
-		if err != nil {
-			return "", err
-		}
-		defer conn.Close()
-
-		return httpIPProbe(conn, targetHost)
-	}
-}
-
-func (p *poolOutbound) makeProbeIPByTagFunc(tag string) func(ctx context.Context) (string, error) {
+func (p *poolOutbound) makeExitIPProbeByTagFunc(tag string) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		// Ensure members are initialized
 		p.mu.Lock()
@@ -687,18 +726,9 @@ func (p *poolOutbound) makeProbeIPByTagFunc(tag string) func(ctx context.Context
 		if member == nil {
 			return "", E.New("member not found: ", tag)
 		}
-
-		targetHost := "api.ipify.org"
-		targetPort := uint16(80)
-		destination := M.ParseSocksaddrHostPort(targetHost, targetPort)
-
-		conn, err := member.outbound.DialContext(ctx, N.NetworkTCP, destination)
-		if err != nil {
-			return "", err
-		}
-		defer conn.Close()
-
-		return httpIPProbe(conn, targetHost)
+		return fetchExitIP(ctx, func(ctx context.Context, dst M.Socksaddr) (net.Conn, error) {
+			return member.outbound.DialContext(ctx, N.NetworkTCP, dst)
+		})
 	}
 }
 
