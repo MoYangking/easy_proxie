@@ -68,6 +68,7 @@ type Snapshot struct {
 }
 
 type probeFunc func(ctx context.Context) (time.Duration, error)
+type probeIPFunc func(ctx context.Context) (string, error)
 type releaseFunc func()
 
 type EntryHandle struct {
@@ -88,6 +89,7 @@ type entry struct {
 	lastProbe        time.Duration
 	active           atomic.Int32
 	probe            probeFunc
+	probeIP          probeIPFunc
 	release          releaseFunc
 	initialCheckDone bool
 	available        bool
@@ -412,6 +414,18 @@ func (m *Manager) Probe(ctx context.Context, tag string) (time.Duration, error) 
 	return latency, nil
 }
 
+// ProbeIP triggers an IP check for the node.
+func (m *Manager) ProbeIP(ctx context.Context, tag string) (string, error) {
+	e, err := m.entry(tag)
+	if err != nil {
+		return "", err
+	}
+	if e.probeIP == nil {
+		return "", errors.New("IP probe not available for this node")
+	}
+	return e.probeIP(ctx)
+}
+
 // Release clears blacklist state for the given node.
 func (m *Manager) Release(tag string) error {
 	e, err := m.entry(tag)
@@ -553,6 +567,12 @@ func (e *entry) setProbe(fn probeFunc) {
 	e.probe = fn
 }
 
+func (e *entry) setProbeIP(fn probeIPFunc) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.probeIP = fn
+}
+
 func (e *entry) setRelease(fn releaseFunc) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -627,6 +647,14 @@ func (h *EntryHandle) SetProbe(fn func(ctx context.Context) (time.Duration, erro
 		return
 	}
 	h.ref.setProbe(fn)
+}
+
+// SetProbeIP assigns an IP probe function.
+func (h *EntryHandle) SetProbeIP(fn func(ctx context.Context) (string, error)) {
+	if h == nil || h.ref == nil {
+		return
+	}
+	h.ref.setProbeIP(fn)
 }
 
 // SetRelease assigns a release function.

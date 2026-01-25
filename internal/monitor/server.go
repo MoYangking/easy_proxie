@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -18,7 +19,7 @@ import (
 	"easy_proxies/internal/config"
 )
 
-//go:embed assets/index.html
+//go:embed assets/*
 var embeddedFS embed.FS
 
 // NodeManager exposes config node CRUD and reload operations.
@@ -213,12 +214,49 @@ func (s *Server) Shutdown(ctx context.Context) {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	data, err := embeddedFS.ReadFile("assets/index.html")
+	path := r.URL.Path
+	if path == "/" {
+		path = "/index.html"
+	}
+
+	// Remove leading slash
+	path = strings.TrimPrefix(path, "/")
+
+	// Prevent directory traversal
+	if strings.Contains(path, "..") {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Try to read from assets/
+	fullPath := "assets/" + path
+	data, err := embeddedFS.ReadFile(fullPath)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			http.NotFound(w, r)
+			return
+		}
+		s.logger.Printf("Error reading asset %s: %v", fullPath, err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	// Detect content type
+	switch {
+	case strings.HasSuffix(path, ".css"):
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case strings.HasSuffix(path, ".js"):
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	case strings.HasSuffix(path, ".html"):
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	case strings.HasSuffix(path, ".png"):
+		w.Header().Set("Content-Type", "image/png")
+	case strings.HasSuffix(path, ".svg"):
+		w.Header().Set("Content-Type", "image/svg+xml")
+	case strings.HasSuffix(path, ".ico"):
+		w.Header().Set("Content-Type", "image/x-icon")
+	}
+
 	_, _ = w.Write(data)
 }
 
@@ -392,6 +430,19 @@ func (s *Server) handleNodeAction(w http.ResponseWriter, r *http.Request) {
 			latencyMs = 1 // Round up sub-millisecond latencies to 1ms
 		}
 		writeJSON(w, map[string]any{"message": "探测成功", "latency_ms": latencyMs})
+	case "probe-ip":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		ip, err := s.mgr.ProbeIP(ctx, tag)
+		if err != nil {
+			writeJSON(w, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]any{"message": "探测成功", "ip": ip})
 	case "delete":
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)

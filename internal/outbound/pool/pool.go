@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"io"
+	"net/http"
 
 	"easy_proxies/internal/monitor"
 
@@ -133,6 +135,9 @@ func newPool(ctx context.Context, _ adapter.Router, logger log.ContextLogger, ta
 				if probeFn := p.makeProbeByTagFunc(memberTag); probeFn != nil {
 					entry.SetProbe(probeFn)
 				}
+				if probeIPFn := p.makeProbeIPByTagFunc(memberTag); probeIPFn != nil {
+					entry.SetProbeIP(probeIPFn)
+				}
 			} else {
 				logger.Warn("failed to register node: ", memberTag)
 			}
@@ -223,6 +228,9 @@ func (p *poolOutbound) initializeMembersLocked() error {
 				entry.SetRelease(p.makeReleaseFunc(member))
 				if probe := p.makeProbeFunc(member); probe != nil {
 					entry.SetProbe(probe)
+				}
+				if probeIP := p.makeProbeIPFunc(member); probeIP != nil {
+					entry.SetProbeIP(probeIP)
 				}
 			}
 		}
@@ -507,6 +515,44 @@ func httpProbe(conn net.Conn, host string) (time.Duration, error) {
 	return ttfb, nil
 }
 
+// httpIPProbe performs an HTTP request to fetch IP address.
+func httpIPProbe(conn net.Conn, host string) (string, error) {
+	// Build HTTP request
+	req := fmt.Sprintf("GET / HTTP/1.1
+Host: %s
+Connection: close
+User-Agent: curl/7.68.0
+
+", host)
+
+	// Try to set write deadline
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
+	// Send HTTP request
+	if _, err := conn.Write([]byte(req)); err != nil {
+		return "", fmt.Errorf("write request: %w", err)
+	}
+
+	// Try to set read deadline
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+	// Read response
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read body: %w", err)
+	}
+
+	return strings.TrimSpace(string(body)), nil
+}
+
 func (p *poolOutbound) makeProbeFunc(member *memberState) func(ctx context.Context) (time.Duration, error) {
 	if p.monitor == nil {
 		return nil
@@ -602,6 +648,62 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 			member.entry.RecordSuccessWithLatency(duration)
 		}
 		return duration, nil
+	}
+}
+
+func (p *poolOutbound) makeProbeIPFunc(member *memberState) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		// Use a reliable IP echo service
+		targetHost := "api.ipify.org"
+		targetPort := uint16(80)
+		destination := M.ParseSocksaddrHostPort(targetHost, targetPort)
+
+		conn, err := member.outbound.DialContext(ctx, N.NetworkTCP, destination)
+		if err != nil {
+			return "", err
+		}
+		defer conn.Close()
+
+		return httpIPProbe(conn, targetHost)
+	}
+}
+
+func (p *poolOutbound) makeProbeIPByTagFunc(tag string) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		// Ensure members are initialized
+		p.mu.Lock()
+		if len(p.members) == 0 {
+			if err := p.initializeMembersLocked(); err != nil {
+				p.mu.Unlock()
+				return "", err
+			}
+		}
+
+		// Find the member by tag
+		var member *memberState
+		for _, m := range p.members {
+			if m.tag == tag {
+				member = m
+				break
+			}
+		}
+		p.mu.Unlock()
+
+		if member == nil {
+			return "", E.New("member not found: ", tag)
+		}
+
+		targetHost := "api.ipify.org"
+		targetPort := uint16(80)
+		destination := M.ParseSocksaddrHostPort(targetHost, targetPort)
+
+		conn, err := member.outbound.DialContext(ctx, N.NetworkTCP, destination)
+		if err != nil {
+			return "", err
+		}
+		defer conn.Close()
+
+		return httpIPProbe(conn, targetHost)
 	}
 }
 
