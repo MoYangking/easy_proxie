@@ -1,46 +1,92 @@
-export const $ = (sel, root = document) => root.querySelector(sel);
-export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+export class UI {
+    static formatLatency(ms) {
+        if (ms < 0) return `<span class="text-secondary">-</span>`;
+        if (ms < 100) return `<span style="color: var(--success)">${ms}</span>`;
+        if (ms < 400) return `<span style="color: var(--warning)">${ms}</span>`;
+        return `<span style="color: var(--error)">${ms}</span>`;
+    }
 
-export function formatTime(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("zh-CN", { hour12: false });
-}
+    static getStatusClass(node) {
+        if (!node.available) return 'error';
+        if (node.last_latency_ms > 400) return 'warning';
+        return 'healthy';
+    }
 
-export function formatLatency(ms) {
-  if (ms == null || ms < 0) return "—";
-  return `${ms} ms`;
-}
+    static renderNodeCard(node) {
+        const statusClass = this.getStatusClass(node);
+        const latency = node.last_latency_ms >= 0 ? node.last_latency_ms : '-';
 
-export function toast(message, type = "info", ttlMs = 2600) {
-  const host = $("#toastHost");
-  if (!host) return;
-  const el = document.createElement("div");
-  el.className = `toast ${type}`;
-  el.textContent = message;
-  host.appendChild(el);
-  window.setTimeout(() => el.remove(), ttlMs);
-}
+        return `
+            <div class="node-card ${statusClass}" data-tag="${node.tag}">
+                <div class="node-header">
+                    <div>
+                        <div class="node-name" title="${node.name}">${node.name}</div>
+                        <div class="node-tag">${node.tag}</div>
+                    </div>
+                    <div class="latency-badge">
+                        ${this.formatLatency(node.last_latency_ms)}<span class="ms">ms</span>
+                    </div>
+                </div>
+                
+                <div class="node-metrics">
+                   <!-- Add sparkleline or mini details here later -->
+                </div>
 
-export function show(el) {
-  if (!el) return;
-  el.hidden = false;
-}
+                <div class="node-actions">
+                    <button class="btn btn-secondary btn-xs btn-probe" data-tag="${node.tag}">
+                        探测
+                    </button>
+                    <button class="btn btn-secondary btn-xs btn-check-ip" data-tag="${node.tag}">
+                        查IP
+                    </button>
+                    <!-- Extra actions placeholder -->
+                </div>
+                <div class="ip-result-container" id="ip-result-${node.tag}" style="margin-top: 0.5rem; display: none;"></div>
+            </div>
+        `;
+    }
 
-export function hide(el) {
-  if (!el) return;
-  el.hidden = true;
-}
+    static renderStats(nodes) {
+        const total = nodes.length;
+        const available = nodes.filter(n => n.available).length;
+        const failed = total - available;
+        const avgLatency = available > 0
+            ? Math.round(nodes.filter(n => n.available).reduce((a, b) => a + b.last_latency_ms, 0) / available)
+            : 0;
 
-export function setText(el, text) {
-  if (!el) return;
-  el.textContent = text;
-}
+        return `
+            <div class="stat-card">
+                <div class="stat-label">总节点数</div>
+                <div class="stat-value">${total}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">可用节点</div>
+                <div class="stat-value" style="color: var(--success)">${available}</div>
+            </div>
+             <div class="stat-card">
+                <div class="stat-label">失效节点</div>
+                <div class="stat-value" style="color: var(--error)">${failed}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">平均延迟</div>
+                <div class="stat-value">${avgLatency}<span style="font-size: 1rem; color: var(--text-secondary)">ms</span></div>
+            </div>
+        `;
+    }
 
-export function setBusy(btn, busy, busyText = "处理中...") {
-  if (!btn) return;
-  if (!btn.dataset._text) btn.dataset._text = btn.textContent || "";
-  btn.disabled = !!busy;
-  btn.textContent = busy ? busyText : btn.dataset._text;
+    static showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `
+            <span>${message}</span>
+        `;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-20px)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
 }

@@ -4,10 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"math/rand"
 	"net"
-	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -135,9 +133,6 @@ func newPool(ctx context.Context, _ adapter.Router, logger log.ContextLogger, ta
 				if probeFn := p.makeProbeByTagFunc(memberTag); probeFn != nil {
 					entry.SetProbe(probeFn)
 				}
-				if ipProbeFn := p.makeExitIPProbeByTagFunc(memberTag); ipProbeFn != nil {
-					entry.SetExitIPProbe(ipProbeFn)
-				}
 			} else {
 				logger.Warn("failed to register node: ", memberTag)
 			}
@@ -228,9 +223,6 @@ func (p *poolOutbound) initializeMembersLocked() error {
 				entry.SetRelease(p.makeReleaseFunc(member))
 				if probe := p.makeProbeFunc(member); probe != nil {
 					entry.SetProbe(probe)
-				}
-				if ipProbe := p.makeExitIPProbeFunc(member); ipProbe != nil {
-					entry.SetExitIPProbe(ipProbe)
 				}
 			}
 		}
@@ -515,87 +507,6 @@ func httpProbe(conn net.Conn, host string) (time.Duration, error) {
 	return ttfb, nil
 }
 
-var exitIPProbeTargets = []struct {
-	Host string
-	Port uint16
-	Path string
-}{
-	{Host: "api.ipify.org", Port: 80, Path: "/?format=text"},
-	{Host: "checkip.amazonaws.com", Port: 80, Path: "/"},
-	{Host: "icanhazip.com", Port: 80, Path: "/"},
-	{Host: "ip.sb", Port: 80, Path: "/"},
-}
-
-func fetchExitIP(ctx context.Context, dial func(ctx context.Context, dst M.Socksaddr) (net.Conn, error)) (string, error) {
-	var lastErr error
-	for _, target := range exitIPProbeTargets {
-		dst := M.ParseSocksaddrHostPort(target.Host, target.Port)
-		conn, err := dial(ctx, dst)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		ip, err := readExitIPFromConn(conn, target.Host, target.Path)
-		_ = conn.Close()
-		if err == nil {
-			return ip, nil
-		}
-		lastErr = err
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no exit ip probe target available")
-	}
-	return "", lastErr
-}
-
-func readExitIPFromConn(conn net.Conn, host, path string) (string, error) {
-	if path == "" {
-		path = "/"
-	}
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-
-	req := fmt.Sprintf(
-		"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: easy_proxies\r\nAccept: */*\r\n\r\n",
-		path,
-		host,
-	)
-	if _, err := conn.Write([]byte(req)); err != nil {
-		return "", fmt.Errorf("write request: %w", err)
-	}
-
-	reader := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("unexpected status: %s", resp.Status)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2048))
-	if err != nil {
-		return "", fmt.Errorf("read body: %w", err)
-	}
-	text := strings.TrimSpace(string(body))
-	if ip := net.ParseIP(text); ip != nil {
-		return ip.String(), nil
-	}
-	for _, token := range strings.FieldsFunc(text, func(r rune) bool {
-		switch r {
-		case ' ', '\n', '\r', '\t', '"', '\'', ',', ';', '{', '}', '[', ']', ':':
-			return true
-		default:
-			return false
-		}
-	}) {
-		if ip := net.ParseIP(token); ip != nil {
-			return ip.String(), nil
-		}
-	}
-	return "", fmt.Errorf("invalid ip response: %q", text)
-}
-
 func (p *poolOutbound) makeProbeFunc(member *memberState) func(ctx context.Context) (time.Duration, error) {
 	if p.monitor == nil {
 		return nil
@@ -630,14 +541,6 @@ func (p *poolOutbound) makeProbeFunc(member *memberState) func(ctx context.Conte
 			member.entry.RecordSuccessWithLatency(duration)
 		}
 		return duration, nil
-	}
-}
-
-func (p *poolOutbound) makeExitIPProbeFunc(member *memberState) func(ctx context.Context) (string, error) {
-	return func(ctx context.Context) (string, error) {
-		return fetchExitIP(ctx, func(ctx context.Context, dst M.Socksaddr) (net.Conn, error) {
-			return member.outbound.DialContext(ctx, N.NetworkTCP, dst)
-		})
 	}
 }
 
@@ -699,36 +602,6 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 			member.entry.RecordSuccessWithLatency(duration)
 		}
 		return duration, nil
-	}
-}
-
-func (p *poolOutbound) makeExitIPProbeByTagFunc(tag string) func(ctx context.Context) (string, error) {
-	return func(ctx context.Context) (string, error) {
-		// Ensure members are initialized
-		p.mu.Lock()
-		if len(p.members) == 0 {
-			if err := p.initializeMembersLocked(); err != nil {
-				p.mu.Unlock()
-				return "", err
-			}
-		}
-
-		// Find the member by tag
-		var member *memberState
-		for _, m := range p.members {
-			if m.tag == tag {
-				member = m
-				break
-			}
-		}
-		p.mu.Unlock()
-
-		if member == nil {
-			return "", E.New("member not found: ", tag)
-		}
-		return fetchExitIP(ctx, func(ctx context.Context, dst M.Socksaddr) (net.Conn, error) {
-			return member.outbound.DialContext(ctx, N.NetworkTCP, dst)
-		})
 	}
 }
 

@@ -3,12 +3,12 @@ package monitor
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -19,7 +19,7 @@ import (
 	"easy_proxies/internal/config"
 )
 
-//go:embed assets
+//go:embed assets/*
 var embeddedFS embed.FS
 
 // NodeManager exposes config node CRUD and reload operations.
@@ -94,11 +94,6 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	s.sessionToken = hex.EncodeToString(tokenBytes)
 
 	mux := http.NewServeMux()
-	if assetFS, err := fs.Sub(embeddedFS, "assets"); err == nil {
-		mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))))
-	} else {
-		logger.Printf("failed to init monitor asset fs: %v", err)
-	}
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/auth", s.handleAuth)
 	mux.HandleFunc("/api/settings", s.withAuth(s.handleSettings))
@@ -107,6 +102,7 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/nodes/config", s.withAuth(s.handleConfigNodes))
 	mux.HandleFunc("/api/nodes/config/", s.withAuth(s.handleConfigNodeItem))
 	mux.HandleFunc("/api/nodes/probe-all", s.withAuth(s.handleProbeAll))
+	mux.HandleFunc("/api/nodes/check-ip", s.withAuth(s.handleCheckIP))
 	mux.HandleFunc("/api/nodes/delete-failed", s.withAuth(s.handleDeleteFailedNodes))
 	mux.HandleFunc("/api/nodes/", s.withAuth(s.handleNodeAction))
 	mux.HandleFunc("/api/debug", s.withAuth(s.handleDebug))
@@ -115,6 +111,11 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/subscription/status", s.withAuth(s.handleSubscriptionStatus))
 	mux.HandleFunc("/api/subscription/refresh", s.withAuth(s.handleSubscriptionRefresh))
 	mux.HandleFunc("/api/reload", s.withAuth(s.handleReload))
+	// Serve static files
+	fs := http.FileServer(http.FS(embeddedFS))
+	mux.Handle("/assets/", fs)
+	mux.HandleFunc("/", s.handleIndex)
+	
 	s.srv = &http.Server{Addr: cfg.Listen, Handler: mux}
 	return s
 }
@@ -219,6 +220,13 @@ func (s *Server) Shutdown(ctx context.Context) {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		// handle non-root paths that are not api or assets as 404 or index if SPA (but here we just return 404)
+        // If it looks like a static asset request that wasn't caught by /assets/, try to serve it?
+        // But we put assets in /assets/. So root is just index.html
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	data, err := embeddedFS.ReadFile("assets/index.html")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -226,6 +234,91 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(data)
+}
+
+func (s *Server) handleCheckIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Tag string `json:"tag"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]any{"error": "请求格式错误"})
+		return
+	}
+
+	if req.Tag == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]any{"error": "Tag cannot be empty"})
+		return
+	}
+	
+	entry, err := s.mgr.entry(req.Tag)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, map[string]any{"error": "Node not found"})
+		return
+	}
+
+	// We need the port to create a proxy client
+	// We have entry.info.ListenAddress and entry.info.Port
+	// Local proxy is at 127.0.0.1:Port usually, or ListenAddress:Port
+	
+	entry.mu.RLock()
+	port := entry.info.Port
+	// listenAddr := entry.info.ListenAddress // might be 0.0.0.0
+	entry.mu.RUnlock()
+
+    if port == 0 {
+        w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]any{"error": "Node has no port assigned"})
+		return
+    }
+
+	// Create a client that uses this proxy
+	proxyUrl, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyUrl),
+            TLSClientConfig: &tls.Config{InsecureSkipVerify: s.cfg.SkipCertVerify},
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	// Use an IP echo service
+	// Using a few fallbacks or just one reliable one?
+	// ipify is good.
+	resp, err := client.Get("https://api.ipify.org?format=json")
+	if err != nil {
+		// Try http if https fails
+		resp, err = client.Get("http://api.ipify.org?format=json")
+	}
+	
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		writeJSON(w, map[string]any{"error": fmt.Sprintf("Failed to check IP: %v", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	var ipResp struct {
+		IP string `json:"ip"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&ipResp); err != nil {
+         // Maybe text response?
+         w.WriteHeader(http.StatusBadGateway)
+         writeJSON(w, map[string]any{"error": "Invalid response from IP service"})
+         return
+	}
+
+	writeJSON(w, map[string]any{
+		"ip": ipResp.IP,
+        "tag": req.Tag,
+	})
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -398,19 +491,6 @@ func (s *Server) handleNodeAction(w http.ResponseWriter, r *http.Request) {
 			latencyMs = 1 // Round up sub-millisecond latencies to 1ms
 		}
 		writeJSON(w, map[string]any{"message": "探测成功", "latency_ms": latencyMs})
-	case "probe-ip":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-		defer cancel()
-		ip, err := s.mgr.ProbeExitIP(ctx, tag)
-		if err != nil {
-			writeJSON(w, map[string]any{"error": err.Error()})
-			return
-		}
-		writeJSON(w, map[string]any{"message": "探测成功", "exit_ip": ip})
 	case "delete":
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)

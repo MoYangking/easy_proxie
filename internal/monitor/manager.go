@@ -62,16 +62,12 @@ type Snapshot struct {
 	LastSuccess       time.Time       `json:"last_success,omitempty"`
 	LastProbeLatency  time.Duration   `json:"last_probe_latency,omitempty"`
 	LastLatencyMs     int64           `json:"last_latency_ms"`
-	LastExitIP        string          `json:"last_exit_ip,omitempty"`
-	LastExitIPAt      time.Time       `json:"last_exit_ip_at,omitempty"`
-	LastExitIPError   string          `json:"last_exit_ip_error,omitempty"`
 	Available         bool            `json:"available"`
 	InitialCheckDone  bool            `json:"initial_check_done"`
 	Timeline          []TimelineEvent `json:"timeline,omitempty"`
 }
 
 type probeFunc func(ctx context.Context) (time.Duration, error)
-type exitIPProbeFunc func(ctx context.Context) (string, error)
 type releaseFunc func()
 
 type EntryHandle struct {
@@ -90,12 +86,8 @@ type entry struct {
 	lastFail         time.Time
 	lastOK           time.Time
 	lastProbe        time.Duration
-	lastExitIP       string
-	lastExitIPAt     time.Time
-	lastExitIPError  string
 	active           atomic.Int32
 	probe            probeFunc
-	exitIPProbe      exitIPProbeFunc
 	release          releaseFunc
 	initialCheckDone bool
 	available        bool
@@ -420,30 +412,6 @@ func (m *Manager) Probe(ctx context.Context, tag string) (time.Duration, error) 
 	return latency, nil
 }
 
-// ProbeExitIP probes the node's egress/public IP.
-func (m *Manager) ProbeExitIP(ctx context.Context, tag string) (string, error) {
-	e, err := m.entry(tag)
-	if err != nil {
-		return "", err
-	}
-	if e.exitIPProbe == nil {
-		return "", errors.New("exit ip probe not available for this node")
-	}
-	ip, err := e.exitIPProbe(ctx)
-	now := time.Now()
-	e.mu.Lock()
-	e.lastExitIPAt = now
-	if err != nil {
-		e.lastExitIPError = err.Error()
-		e.mu.Unlock()
-		return "", err
-	}
-	e.lastExitIP = ip
-	e.lastExitIPError = ""
-	e.mu.Unlock()
-	return ip, nil
-}
-
 // Release clears blacklist state for the given node.
 func (m *Manager) Release(tag string) error {
 	e, err := m.entry(tag)
@@ -505,9 +473,6 @@ func (e *entry) snapshot() Snapshot {
 		LastSuccess:       e.lastOK,
 		LastProbeLatency:  e.lastProbe,
 		LastLatencyMs:     latencyMs,
-		LastExitIP:        e.lastExitIP,
-		LastExitIPAt:      e.lastExitIPAt,
-		LastExitIPError:   e.lastExitIPError,
 		Available:         e.available,
 		InitialCheckDone:  e.initialCheckDone,
 		Timeline:          timelineCopy,
@@ -588,12 +553,6 @@ func (e *entry) setProbe(fn probeFunc) {
 	e.probe = fn
 }
 
-func (e *entry) setExitIPProbe(fn exitIPProbeFunc) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.exitIPProbe = fn
-}
-
 func (e *entry) setRelease(fn releaseFunc) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -668,14 +627,6 @@ func (h *EntryHandle) SetProbe(fn func(ctx context.Context) (time.Duration, erro
 		return
 	}
 	h.ref.setProbe(fn)
-}
-
-// SetExitIPProbe assigns an exit-IP probe function.
-func (h *EntryHandle) SetExitIPProbe(fn func(ctx context.Context) (string, error)) {
-	if h == nil || h.ref == nil {
-		return
-	}
-	h.ref.setExitIPProbe(fn)
 }
 
 // SetRelease assigns a release function.

@@ -1,357 +1,97 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Easy Proxies - 节点监控</title>
-    <link rel="stylesheet" href="/assets/css/style.css" />
-    <script type="module" src="/assets/js/app.js"></script>
-  </head>
-  <body>
-    <div class="app">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-title">Easy Proxies</div>
-          <div class="brand-sub">节点监控面板</div>
-        </div>
-
-        <div class="topbar-actions">
-          <button class="btn" data-action="refresh">刷新</button>
-
-          <label class="switch">
-            <input id="autoRefresh" type="checkbox" />
-            <span class="switch-ui"></span>
-            <span class="switch-text">自动刷新</span>
-          </label>
-
-          <button class="btn" data-action="probeAll">批量探测</button>
-          <button class="btn" data-action="export">导出</button>
-          <button class="btn" data-action="reload">重载</button>
-
-          <div class="split"></div>
-
-          <label class="switch">
-            <input id="darkMode" type="checkbox" />
-            <span class="switch-ui"></span>
-            <span class="switch-text">深色</span>
-          </label>
-        </div>
-      </header>
-
-      <nav class="tabs" role="tablist" aria-label="导航">
-        <button class="tab is-active" data-tab="nodes" type="button">节点</button>
-        <button class="tab" data-tab="config" type="button">配置节点</button>
-        <button class="tab" data-tab="subscription" type="button">订阅</button>
-        <button class="tab" data-tab="settings" type="button">设置</button>
-        <button class="tab" data-tab="debug" type="button">调试</button>
-      </nav>
-
-      <main class="content">
-        <section class="page is-active" data-page="nodes">
-          <div class="stats" id="stats"></div>
-
-          <section class="panel">
-            <header class="panel-head">
-              <div class="panel-title">节点列表</div>
-              <div class="panel-actions">
-                <input class="input" id="nodeSearch" placeholder="搜索 名称 / 标签 / URI" />
-                <label class="check">
-                  <input id="showAllNodes" type="checkbox" />
-                  <span>显示全部（含失败）</span>
-                </label>
-                <button class="btn danger" data-action="deleteFailed" type="button">删除失败节点</button>
-              </div>
-            </header>
-
-            <div class="table-wrap">
-              <table class="table" id="nodesTable">
-                <thead>
-                  <tr>
-                    <th>状态</th>
-                    <th>名称</th>
-                    <th>模式</th>
-                    <th>延迟</th>
-                    <th>出口 IP</th>
-                    <th>连接</th>
-                    <th>成功</th>
-                    <th>失败</th>
-                    <th>错误</th>
-                    <th style="width: 260px">操作</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Proxies - Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+    <div class="app-background"></div>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <h1>Easy Proxies</h1>
+                <span class="status-badge" id="system-status">Checking...</span>
             </div>
-          </section>
-        </section>
-
-        <section class="page" data-page="config">
-          <section class="panel">
-            <header class="panel-head">
-              <div class="panel-title">配置节点（nodes.txt）</div>
-              <div class="panel-actions">
-                <button class="btn" data-action="configRefresh" type="button">刷新</button>
-                <button class="btn primary" data-action="configAdd" type="button">新增节点</button>
-              </div>
-            </header>
-
-            <div id="configNotice" class="notice" hidden></div>
-
-            <div class="table-wrap">
-              <table class="table" id="configTable">
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>URI</th>
-                    <th>端口</th>
-                    <th>用户名</th>
-                    <th style="width: 220px">操作</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+            <div class="header-actions">
+                <button id="theme-toggle" class="icon-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <div id="auth-area"></div>
             </div>
-          </section>
-        </section>
+        </header>
 
-        <section class="page" data-page="subscription">
-          <section class="panel">
-            <header class="panel-head">
-              <div class="panel-title">订阅</div>
-              <div class="panel-actions">
-                <button class="btn" data-action="subRefreshStatus" type="button">刷新状态</button>
-                <button class="btn" data-action="subRefreshNow" type="button">立即刷新</button>
-                <button class="btn primary" data-action="subSave" type="button">保存配置</button>
-              </div>
-            </header>
+        <!-- Main Content -->
+        <main id="main-content">
+            <!-- Stats Row -->
+            <section class="stats-grid" id="stats-grid">
+                <!-- Injected via JS -->
+            </section>
 
-            <div id="subNotice" class="notice" hidden></div>
-
-            <div class="grid2">
-              <div class="field">
-                <label class="label">订阅地址（每行一个）</label>
-                <textarea class="textarea" id="subUrls" rows="8" placeholder="https://example.com/subscription"></textarea>
-              </div>
-
-              <div class="field">
-                <label class="label">刷新策略</label>
-                <div class="form-grid">
-                  <label class="check">
-                    <input id="subEnabled" type="checkbox" />
-                    <span>启用定时刷新</span>
-                  </label>
-                  <div class="field">
-                    <label class="label-sm">间隔</label>
-                    <input class="input" id="subInterval" placeholder="例如：10m / 1h" />
-                  </div>
-                  <div class="field">
-                    <label class="label-sm">超时</label>
-                    <input class="input" id="subTimeout" placeholder="例如：30s" />
-                  </div>
-                  <div class="field">
-                    <label class="label-sm">健康检查超时</label>
-                    <input class="input" id="subHealthTimeout" placeholder="例如：10s" />
-                  </div>
-                  <div class="field">
-                    <label class="label-sm">排空超时</label>
-                    <input class="input" id="subDrainTimeout" placeholder="例如：30s" />
-                  </div>
-                  <div class="field">
-                    <label class="label-sm">最小可用节点数</label>
-                    <input class="input" id="subMinAvailable" type="number" min="1" step="1" />
-                  </div>
+            <!-- Controls -->
+            <section class="controls-area">
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="monitor">监控面板</button>
+                    <button class="tab-btn" data-tab="config">配置管理</button>
+                    <button class="tab-btn" data-tab="settings">系统设置</button>
                 </div>
-              </div>
-            </div>
-
-            <div class="panel-foot">
-              <div class="kv" id="subStatus"></div>
-            </div>
-          </section>
-        </section>
-
-        <section class="page" data-page="settings">
-          <section class="panel">
-            <header class="panel-head">
-              <div class="panel-title">运行设置</div>
-              <div class="panel-actions">
-                <button class="btn primary" data-action="settingsSave" type="button">保存</button>
-              </div>
-            </header>
-
-            <div class="grid2">
-              <div class="field">
-                <label class="label">外部 IP 地址</label>
-                <input class="input" id="settingExternalIP" placeholder="例如：1.2.3.4 或 example.com" />
-                <div class="help">用于导出时将 0.0.0.0 / :: 替换为可访问地址。</div>
-              </div>
-
-              <div class="field">
-                <label class="label">探测目标</label>
-                <input class="input" id="settingProbeTarget" placeholder="例如：https://www.google.com/generate_204" />
-                <div class="help">用于节点延迟探测和健康检查。</div>
-              </div>
-
-              <div class="field">
-                <label class="check">
-                  <input id="settingSkipCertVerify" type="checkbox" />
-                  <span>跳过 SSL 证书校验</span>
-                </label>
-              </div>
-
-              <div class="field">
-                <label class="label">负载模式</label>
-                <select class="select" id="settingPoolMode">
-                  <option value="sequential">顺序</option>
-                  <option value="random">随机</option>
-                  <option value="balance">均衡</option>
-                </select>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel">
-            <header class="panel-head">
-              <div class="panel-title">代理认证</div>
-              <div class="panel-actions">
-                <label class="check">
-                  <input id="proxyAuthReload" type="checkbox" />
-                  <span>保存后立即重载</span>
-                </label>
-                <button class="btn primary" data-action="proxyAuthSave" type="button">保存</button>
-              </div>
-            </header>
-
-            <div id="proxyAuthNotice" class="notice" hidden></div>
-
-            <div class="grid2">
-              <div class="panel mini">
-                <div class="mini-title">listener（单端口）</div>
-                <label class="check">
-                  <input id="proxyListenerEnabled" type="checkbox" />
-                  <span>启用认证</span>
-                </label>
-                <div class="field">
-                  <label class="label-sm">用户名</label>
-                  <input class="input" id="proxyListenerUsername" placeholder="用户名" />
+                <div class="actions">
+                    <button class="btn btn-primary" id="btn-probe-all">
+                        <span class="icon">⚡</span> 立即探测所有
+                    </button>
+                    <button class="btn btn-secondary" id="btn-delete-failed">
+                        <span class="icon">🗑️</span> 清理失效
+                    </button>
                 </div>
-                <div class="field">
-                  <label class="label-sm">密码（留空表示不修改）</label>
-                  <input class="input" id="proxyListenerPassword" type="password" placeholder="密码" />
-                </div>
-              </div>
+            </section>
 
-              <div class="panel mini">
-                <div class="mini-title">multi_port（多端口/混合）</div>
-                <label class="check">
-                  <input id="proxyMultiEnabled" type="checkbox" />
-                  <span>启用认证</span>
-                </label>
-                <div class="field">
-                  <label class="label-sm">用户名</label>
-                  <input class="input" id="proxyMultiUsername" placeholder="用户名" />
+            <!-- Views -->
+            <div class="views-container">
+                <!-- Monitor View -->
+                <div class="view active" id="view-monitor">
+                    <div class="nodes-grid" id="nodes-grid">
+                        <!-- Nodes Injected via JS -->
+                    </div>
                 </div>
-                <div class="field">
-                  <label class="label-sm">密码（留空表示不修改）</label>
-                  <input class="input" id="proxyMultiPassword" type="password" placeholder="密码" />
+
+                <!-- Config View -->
+                <div class="view" id="view-config">
+                    <div class="config-header">
+                        <h2>节点配置</h2>
+                        <button class="btn btn-primary" id="btn-add-node">添加节点</button>
+                    </div>
+                    <div class="config-list" id="config-list">
+                        <!-- Config Items -->
+                    </div>
                 </div>
-              </div>
+
+                <!-- Settings View -->
+                <div class="view" id="view-settings">
+                    <div class="settings-card">
+                        <h2>系统设置</h2>
+                        <form id="settings-form">
+                            <!-- Settings Form -->
+                        </form>
+                    </div>
+                </div>
             </div>
-          </section>
-        </section>
-
-        <section class="page" data-page="debug">
-          <section class="panel">
-            <header class="panel-head">
-              <div class="panel-title">调试信息</div>
-              <div class="panel-actions">
-                <button class="btn" data-action="debugRefresh" type="button">刷新</button>
-              </div>
-            </header>
-            <pre class="code" id="debugOutput">{}</pre>
-          </section>
-        </section>
-      </main>
+        </main>
     </div>
 
-    <!-- 登录 -->
-    <div class="modal-overlay" id="loginOverlay" hidden>
-      <div class="modal">
-        <div class="modal-head">
-          <div class="modal-title">身份验证</div>
-        </div>
-        <form id="loginForm" class="modal-body">
-          <div class="field">
-            <label class="label">访问密码</label>
-            <input class="input" id="loginPassword" type="password" autocomplete="current-password" required />
-          </div>
-          <div class="error" id="loginError" hidden></div>
-          <div class="modal-actions">
-            <button class="btn primary" type="submit">登录</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <!-- Modals -->
+    <div id="modal-container"></div>
 
-    <!-- 配置节点弹窗 -->
-    <div class="modal-overlay" id="configModal" hidden>
-      <div class="modal">
-        <div class="modal-head">
-          <div class="modal-title" id="configModalTitle">新增节点</div>
-        </div>
-        <form id="configForm" class="modal-body">
-          <input id="configEditingName" type="hidden" />
-          <div class="grid2">
-            <div class="field">
-              <label class="label">名称</label>
-              <input class="input" id="configName" required />
-            </div>
-            <div class="field">
-              <label class="label">端口</label>
-              <input class="input" id="configPort" type="number" min="1" max="65535" />
-            </div>
-          </div>
-          <div class="field">
-            <label class="label">URI</label>
-            <input class="input" id="configURI" placeholder="例如：socks5://user:pass@host:port" required />
-          </div>
-          <div class="grid2">
-            <div class="field">
-              <label class="label">用户名</label>
-              <input class="input" id="configUsername" />
-            </div>
-            <div class="field">
-              <label class="label">密码</label>
-              <input class="input" id="configPassword" type="password" />
-            </div>
-          </div>
-          <div class="error" id="configError" hidden></div>
-          <div class="modal-actions">
-            <button class="btn" data-action="configCancel" type="button">取消</button>
-            <button class="btn primary" type="submit">保存</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
 
-    <!-- 批量探测进度 -->
-    <div class="modal-overlay" id="probeOverlay" hidden>
-      <div class="modal">
-        <div class="modal-head">
-          <div class="modal-title">批量探测</div>
-        </div>
-        <div class="modal-body">
-          <div class="progress">
-            <div class="progress-bar" id="probeBar"></div>
-          </div>
-          <div class="kv" id="probeInfo"></div>
-          <div class="modal-actions">
-            <button class="btn" data-action="probeClose" type="button">关闭</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="toast-host" id="toastHost"></div>
-  </body>
+    <!-- Scripts -->
+    <script type="module" src="assets/js/app.js"></script>
+</body>
 </html>
