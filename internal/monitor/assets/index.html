@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/style.css">
 </head>
+
 <body>
     <div class="app-background"></div>
     <div class="app-container">
@@ -19,7 +21,21 @@
                 <span class="status-badge" id="system-status">Checking...</span>
             </div>
             <div class="header-actions">
-                <button id="theme-toggle" class="icon-btn">
+                <a href="/api/export" class="icon-btn" title="Export Proxy List" target="_blank">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                </a>
+                <button id="btn-reload" class="icon-btn" title="Reload System">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M23 4v6h-6"></path>
+                        <path d="M1 20v-6h6"></path>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                </button>
+                <button id="theme-toggle" class="icon-btn" style="display:none">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                     </svg>
@@ -40,6 +56,7 @@
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="monitor">监控面板</button>
                     <button class="tab-btn" data-tab="config">配置管理</button>
+                    <button class="tab-btn" data-tab="subscriptions">订阅管理</button>
                     <button class="tab-btn" data-tab="settings">系统设置</button>
                 </div>
                 <div class="actions">
@@ -72,6 +89,28 @@
                     </div>
                 </div>
 
+                <!-- Subscriptions View -->
+                <div class="view" id="view-subscriptions">
+                    <div class="settings-card">
+                        <div class="config-header">
+                            <h2>订阅管理</h2>
+                            <button class="btn btn-primary" id="btn-refresh-subs">
+                                <span class="icon">🔄</span> 立即刷新订阅
+                            </button>
+                        </div>
+
+                        <!-- Status Panel -->
+                        <div class="metric-grid" id="sub-status-grid"
+                            style="grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem;">
+                            <!-- Injected -->
+                        </div>
+
+                        <form id="subscription-form">
+                            <!-- Injected -->
+                        </form>
+                    </div>
+                </div>
+
                 <!-- Settings View -->
                 <div class="view" id="view-settings">
                     <div class="settings-card">
@@ -94,4 +133,5 @@
     <!-- Scripts -->
     <script type="module" src="assets/js/app.js"></script>
 </body>
+
 </html>

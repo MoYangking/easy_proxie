@@ -4,32 +4,101 @@ import { UI } from './ui.js';
 class App {
     constructor() {
         this.nodes = [];
+        this.loggedIn = false;
         this.init();
     }
 
     async init() {
         this.bindEvents();
-        await this.loadData();
-        // Auto refresh every 5s
-        setInterval(() => this.loadData(), 5000);
+
+        // check auth first
+        try {
+            await API.getSettings(); // cheap probe
+            this.loggedIn = true;
+            this.updateAuthUI();
+        } catch (e) {
+            this.loggedIn = false;
+            this.updateAuthUI();
+            UI.showLoginModal((pwd) => this.handleLogin(pwd));
+        }
+
+        if (this.loggedIn) {
+            await this.loadData();
+            // Auto refresh every 5s
+            setInterval(() => this.loadData(), 5000);
+        }
+    }
+
+    async handleLogin(password) {
+        try {
+            const res = await API.login(password);
+            if (res.token || res.no_password) {
+                this.loggedIn = true;
+                document.getElementById('modal-container').innerHTML = ''; // close modal
+                this.updateAuthUI();
+                await this.loadData();
+                setInterval(() => this.loadData(), 5000); // start polling
+                UI.showToast('Login Successful', 'success');
+            }
+        } catch (e) {
+            UI.showToast(e.message, 'error');
+        }
+    }
+
+    updateAuthUI() {
+        const area = document.getElementById('auth-area');
+        if (this.loggedIn) {
+            area.innerHTML = '<span class="status-badge healthy">Logged In</span>';
+        } else {
+            area.innerHTML = '<span class="status-badge error">Not Logged In</span>';
+        }
     }
 
     bindEvents() {
         // Tabs
         document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 const tabName = e.target.dataset.tab;
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
 
                 e.target.classList.add('active');
                 document.getElementById(`view-${tabName}`).classList.add('active');
+
+                if (tabName === 'config') await this.loadConfig();
+                if (tabName === 'subscriptions') await this.loadSubscriptions();
+                if (tabName === 'settings') {
+                    await this.loadSettings();
+                    await this.loadProxyAuth();
+                }
             });
         });
 
         // Global Buttons
         document.getElementById('btn-probe-all').addEventListener('click', () => this.probeAll());
         document.getElementById('btn-delete-failed').addEventListener('click', () => this.deleteFailed());
+        document.getElementById('btn-add-node').addEventListener('click', () => {
+            UI.showAddNodeModal((node) => this.addNode(node));
+        });
+
+        const btnRefreshSubs = document.getElementById('btn-refresh-subs');
+        if (btnRefreshSubs) {
+            btnRefreshSubs.addEventListener('click', async () => {
+                try {
+                    btnRefreshSubs.disabled = true;
+                    btnRefreshSubs.innerText = 'Refreshing...';
+                    await API.refreshSubscriptions();
+                    UI.showToast('Subscription Refresh Triggered', 'success');
+                    await this.loadSubscriptions(); // reload status
+                } catch (e) {
+                    UI.showToast(e.message, 'error');
+                } finally {
+                    btnRefreshSubs.disabled = false;
+                    btnRefreshSubs.innerHTML = '<span class="icon">🔄</span> 立即刷新订阅';
+                }
+            });
+        }
+        document.getElementById('btn-reload').addEventListener('click', () => this.handleReload());
 
         // Node Actions Delegation
         document.getElementById('nodes-grid').addEventListener('click', async (e) => {
@@ -43,6 +112,196 @@ class App {
                 await this.checkNodeIP(tag, btn);
             }
         });
+    }
+
+    async loadConfig() {
+        try {
+            const res = await API.getConfigNodes();
+            const list = document.getElementById('config-list');
+            list.innerHTML = res.nodes.map(n => UI.renderConfigItem(n)).join('');
+
+            // Rebind delete buttons
+            list.querySelectorAll('.btn-delete-config').forEach(btn => {
+                btn.addEventListener('click', (e) => this.deleteConfigNode(e.target.dataset.name));
+            });
+        } catch (e) {
+            UI.showToast('Load Config Failed: ' + e.message, 'error');
+        }
+    }
+
+    async addNode(node) {
+        try {
+            await API.addConfigNode(node);
+            UI.showToast('Node Added', 'success');
+            await this.loadConfig();
+            this.handleReload(false); // auto reload backend?
+        } catch (e) {
+            UI.showToast(e.message, 'error');
+        }
+    }
+
+    async deleteConfigNode(name) {
+        if (!confirm(`Delete node "${name}"?`)) return;
+        try {
+            await API.deleteConfigNode(name);
+            UI.showToast('Node Deleted', 'success');
+            await this.loadConfig();
+        } catch (e) {
+            UI.showToast(e.message, 'error');
+        }
+    }
+
+    async loadSubscriptions() {
+        try {
+            const [config, status] = await Promise.all([
+                API.getSubscriptionConfig(),
+                API.getSubscriptionStatus()
+            ]);
+
+            const form = document.getElementById('subscription-form');
+            form.innerHTML = UI.renderSubscriptionForm(config);
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                await this.saveSubscriptions(new FormData(e.target));
+            };
+
+            const grid = document.getElementById('sub-status-grid');
+            grid.innerHTML = UI.renderSubscriptionStatus(status);
+        } catch (e) {
+            UI.showToast('Load Subscriptions Failed: ' + e.message, 'error');
+        }
+    }
+
+    async saveSubscriptions(formData) {
+        const subs = formData.get('subscriptions').split('\n').filter(s => s.trim());
+        const config = {
+            subscriptions: subs,
+            subscription_refresh: {
+                enabled: formData.get('enabled') === 'on',
+                interval: formData.get('interval') || '30m',
+                timeout: formData.get('timeout') || '30s',
+                min_available_nodes: parseInt(formData.get('min_available_nodes') || 1)
+            }
+        };
+        try {
+            await API.updateSubscriptionConfig(config);
+            UI.showToast('Subscriptions Saved', 'success');
+            await this.loadSubscriptions();
+        } catch (e) {
+            UI.showToast(e.message, 'error');
+        }
+    }
+
+    async loadProxyAuth() {
+        try {
+            const auth = await API.getProxyAuth();
+
+            // Append auth settings to settings form or a separate container? 
+            // It's cleaner to have a separate section if we can, but let's append to settings-form 
+            // or better yet, UI.renderSettingsForm should handle it if we pass it entire data.
+            // But Settings API and Proxy Auth API are different.
+            // Let's create a separate div for Proxy Auth in settings view
+
+            let container = document.getElementById('proxy-auth-settings');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'proxy-auth-settings';
+                container.className = 'settings-card';
+                container.style.marginTop = '2rem';
+                document.getElementById('view-settings').appendChild(container);
+            }
+
+            container.innerHTML = `
+                <h2>代理认证设置 (Proxy Auth)</h2>
+                <form id="proxy-auth-form">
+                    ${UI.renderProxyAuthForm(auth)}
+                </form>
+            `;
+
+            document.getElementById('proxy-auth-form').onsubmit = async (e) => {
+                e.preventDefault();
+                await this.saveProxyAuth(new FormData(e.target));
+            };
+
+        } catch (e) {
+            UI.showToast('Load Proxy Auth Failed: ' + e.message, 'error');
+        }
+    }
+
+    async saveProxyAuth(formData) {
+        // Construct nested object
+        const req = {
+            listener: {
+                // enabled checkbox logic is tricky with FormData if not present
+                // We typically check strictly
+                // UI.renderProxyAuthForm will use checkboxes
+                username: formData.get('listener_username'),
+                password: formData.get('listener_password')
+            },
+            multi_port: {
+                username: formData.get('multi_port_username'),
+                password: formData.get('multi_port_password')
+            },
+            reload: true
+        };
+
+        // Handle checkboxes manually if needed, or assume empty string means disabled?
+        // Actually backend logic: if enabled/username/password are nil, no change.
+        // We want to update.
+        // Let's simplify: Just send username/password. Empty string clears it.
+
+        try {
+            const res = await API.updateProxyAuth(req);
+            UI.showToast(res.message, 'success');
+            if (res.need_reload) {
+                // ...
+            }
+        } catch (e) {
+            UI.showToast(e.message, 'error');
+        }
+    }
+
+    async loadSettings() {
+        try {
+            const settings = await API.getSettings();
+            const formContainer = document.getElementById('settings-form');
+            formContainer.innerHTML = UI.renderSettingsForm(settings);
+
+            formContainer.onsubmit = async (e) => {
+                e.preventDefault();
+                await this.saveSettings(new FormData(e.target));
+            };
+        } catch (e) {
+            UI.showToast('Load Settings Failed: ' + e.message, 'error');
+        }
+    }
+
+    async saveSettings(formData) {
+        const settings = {
+            pool_mode: formData.get('pool_mode'),
+            external_ip: formData.get('external_ip'),
+            probe_target: formData.get('probe_target'),
+            skip_cert_verify: formData.get('skip_cert_verify') === 'on'
+        };
+        try {
+            const res = await API.updateSettings(settings);
+            UI.showToast(res.message, 'success');
+            if (res.need_reload) {
+                // Prompt reload?
+            }
+        } catch (e) {
+            UI.showToast(e.message, 'error');
+        }
+    }
+
+    async handleReload(notify = true) {
+        try {
+            await API.reload();
+            if (notify) UI.showToast('System Reloaded', 'success');
+            await this.loadData();
+        } catch (e) {
+            UI.showToast(e.message, 'error');
+        }
     }
 
     async loadData() {
