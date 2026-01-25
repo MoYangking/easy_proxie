@@ -518,16 +518,7 @@ func httpProbe(conn net.Conn, host string) (time.Duration, error) {
 // httpIPProbe performs an HTTP request to fetch IP address.
 func httpIPProbe(conn net.Conn, host string) (string, error) {
 	// Build HTTP request
-	req := fmt.Sprintf("GET / HTTP/1.1
-" +
-		"Host: %s
-" +
-		"Connection: close
-" +
-		"User-Agent: curl/7.68.0
-" +
-		"
-", host)
+	req := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: curl/7.68.0\r\n\r\n", host)
 
 	// Try to set write deadline
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
