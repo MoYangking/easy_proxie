@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -282,7 +283,7 @@ func (s *Server) handleCheckIP(w http.ResponseWriter, r *http.Request) {
 
 	// Use internal dialer if available to bypass listener port conflicts (pool mode)
 	dialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		conn, err := entry.Dial(ctx, network, addr)
+		conn, err := entry.dial(ctx, network, addr)
 		if err != nil {
 			// Fallback to direct dial if entry has no dialer (e.g. not initialized properly)
 			// But since we register it in pool, it should exist.
