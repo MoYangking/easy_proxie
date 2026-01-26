@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"easy_proxies/internal/config"
 
 	"github.com/coder/websocket"
+	M "github.com/sagernet/sing/common/metadata"
 )
 
 //go:embed assets/*
@@ -277,23 +280,51 @@ func (s *Server) handleCheckIP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entry.mu.RLock()
+	dial := entry.dial
 	port := entry.info.Port
 	entry.mu.RUnlock()
 
-	if port == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": "Node has no port assigned"})
-		return
-	}
+	// Prefer dialing through the specific node outbound when available.
+	// This avoids "IP串号" in pool mode where multiple nodes share the same local port.
+	var client *http.Client
+	if dial != nil {
+		client = &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					host, portStr, err := net.SplitHostPort(addr)
+					if err != nil {
+						return nil, err
+					}
+					portNum, err := strconv.Atoi(portStr)
+					if err != nil || portNum <= 0 || portNum > 65535 {
+						return nil, fmt.Errorf("invalid port %q", portStr)
+					}
+					destination := M.ParseSocksaddrHostPort(host, uint16(portNum))
+					return dial(ctx, network, destination)
+				},
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: s.cfg.SkipCertVerify},
+			},
+			Timeout: 8 * time.Second,
+		}
+	} else {
+		if port == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{"error": "Node has no port assigned"})
+			return
+		}
 
-	// Create a client that uses this proxy
-	proxyUrl, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy:           http.ProxyURL(proxyUrl),
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: s.cfg.SkipCertVerify},
-		},
-		Timeout: 8 * time.Second,
+		// Fallback: create a client that uses the node's local proxy port.
+		proxyURL := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", port)}
+		if s.cfg.ProxyUsername != "" {
+			proxyURL.User = url.UserPassword(s.cfg.ProxyUsername, s.cfg.ProxyPassword)
+		}
+		client = &http.Client{
+			Transport: &http.Transport{
+				Proxy:           http.ProxyURL(proxyURL),
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: s.cfg.SkipCertVerify},
+			},
+			Timeout: 8 * time.Second,
+		}
 	}
 
 	// Multi-sample: check IP 3 times to get reliable result

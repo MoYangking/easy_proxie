@@ -131,6 +131,7 @@ func newPool(ctx context.Context, _ adapter.Router, logger log.ContextLogger, ta
 				logger.Info("registered node: ", memberTag)
 				// Set probe and release functions immediately
 				entry.SetRelease(p.makeReleaseByTagFunc(memberTag))
+				entry.SetDial(p.makeDialByTagFunc(memberTag))
 				if probeFn := p.makeProbeByTagFunc(memberTag); probeFn != nil {
 					entry.SetProbe(probeFn)
 				}
@@ -224,6 +225,7 @@ func (p *poolOutbound) initializeMembersLocked() error {
 				state.attachEntry(entry)
 				member.entry = entry
 				entry.SetRelease(p.makeReleaseFunc(member))
+				entry.SetDial(p.makeDialFunc(member))
 				if probe := p.makeProbeFunc(member); probe != nil {
 					entry.SetProbe(probe)
 				}
@@ -527,6 +529,15 @@ func (p *poolOutbound) makeReleaseFunc(member *memberState) func() {
 	}
 }
 
+func (p *poolOutbound) makeDialFunc(member *memberState) func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	if member == nil {
+		return nil
+	}
+	return func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+		return member.outbound.DialContext(ctx, network, destination)
+	}
+}
+
 // httpProbe performs an HTTP probe through the connection and measures TTFB.
 // It sends a minimal HTTP request and waits for the first byte of response.
 func httpProbe(conn net.Conn, host string) (time.Duration, error) {
@@ -662,6 +673,35 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 			member.entry.RecordSuccessWithLatency(duration)
 		}
 		return duration, nil
+	}
+}
+
+// makeDialByTagFunc creates a dial function that works before member initialization.
+func (p *poolOutbound) makeDialByTagFunc(tag string) func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	return func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+		// Ensure members are initialized
+		p.mu.Lock()
+		if len(p.members) == 0 {
+			if err := p.initializeMembersLocked(); err != nil {
+				p.mu.Unlock()
+				return nil, err
+			}
+		}
+
+		// Find the member by tag
+		var member *memberState
+		for _, m := range p.members {
+			if m.tag == tag {
+				member = m
+				break
+			}
+		}
+		p.mu.Unlock()
+
+		if member == nil {
+			return nil, E.New("member not found: ", tag)
+		}
+		return member.outbound.DialContext(ctx, network, destination)
 	}
 }
 

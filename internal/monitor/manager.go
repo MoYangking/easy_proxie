@@ -69,6 +69,7 @@ type Snapshot struct {
 
 type probeFunc func(ctx context.Context) (time.Duration, error)
 type releaseFunc func()
+type dialFunc func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error)
 
 type EntryHandle struct {
 	ref *entry
@@ -89,6 +90,7 @@ type entry struct {
 	active           atomic.Int32
 	probe            probeFunc
 	release          releaseFunc
+	dial             dialFunc
 	initialCheckDone bool
 	available        bool
 	mu               sync.RWMutex
@@ -559,6 +561,12 @@ func (e *entry) setRelease(fn releaseFunc) {
 	e.release = fn
 }
 
+func (e *entry) setDial(fn dialFunc) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.dial = fn
+}
+
 func (e *entry) recordProbeLatency(d time.Duration) {
 	e.mu.Lock()
 	e.lastProbe = d
@@ -635,6 +643,14 @@ func (h *EntryHandle) SetRelease(fn func()) {
 		return
 	}
 	h.ref.setRelease(fn)
+}
+
+// SetDial assigns a dial function so monitor endpoints can open a connection through this node.
+func (h *EntryHandle) SetDial(fn func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error)) {
+	if h == nil || h.ref == nil {
+		return
+	}
+	h.ref.setDial(fn)
 }
 
 // MarkInitialCheckDone marks the initial health check as completed.

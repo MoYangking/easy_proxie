@@ -6,6 +6,7 @@ class App {
         this.nodes = [];
         this.loggedIn = false;
         this.nodeHashes = new Map(); // Track node state for diff rendering
+        this.ipCheckSeq = new Map(); // Per-node request sequencing for check-ip
         this.ws = null;
         this.wsReconnectTimer = null;
         this.init();
@@ -454,7 +455,8 @@ class App {
         // Preserve IP results
         const ipResults = {};
         document.querySelectorAll('.ip-result-container').forEach(el => {
-            if (el.querySelector('.ip-result') || el.innerHTML.includes('查询失败')) {
+            const html = el.innerHTML.trim();
+            if (html !== '' || el.style.display !== 'none') {
                 ipResults[el.id] = { html: el.innerHTML, display: el.style.display };
             }
         });
@@ -524,21 +526,35 @@ class App {
 
     async checkNodeIP(tag, btn) {
         const originalText = btn.innerHTML;
+        const seq = (this.ipCheckSeq.get(tag) || 0) + 1;
+        this.ipCheckSeq.set(tag, seq);
         btn.disabled = true;
         btn.innerHTML = '查询中(3次)...';
 
-        const resultContainer = document.getElementById(`ip-result-${tag}`);
+        const containerId = `ip-result-${tag}`;
+        const getContainer = () => document.getElementById(containerId);
+
+        let resultContainer = getContainer();
+        if (!resultContainer) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            return;
+        }
         resultContainer.style.display = 'block';
         resultContainer.innerHTML = '<span class="text-secondary">正在采样3次...</span>';
 
         try {
             const res = await API.checkIP(tag);
+            if (this.ipCheckSeq.get(tag) !== seq) return;
+            if (res.tag && res.tag !== tag) throw new Error('check-ip response tag mismatch');
             const stableIcon = res.is_stable ? '✅' : '⚠️';
             const allIpsText = res.all_ips && res.all_ips.length > 1
                 ? `<div class="text-secondary" style="font-size:0.75rem; margin-top:4px">检测到: ${res.all_ips.join(', ')}</div>`
                 : '';
 
             // Initial display
+            resultContainer = getContainer();
+            if (!resultContainer) return;
             resultContainer.innerHTML = `
                 <div class="ip-result">${stableIcon} IP: ${res.ip} <span class="geo-loading">🌍...</span></div>
                 ${allIpsText}
@@ -547,19 +563,34 @@ class App {
             // Fetch GeoIP async
             try {
                 const geo = await API.getGeoIP(res.ip);
+                if (this.ipCheckSeq.get(tag) !== seq) return;
                 const geoText = `${UI.countryFlag(geo.country_code)} ${geo.city || geo.country}`;
-                resultContainer.querySelector('.geo-loading').outerHTML = `<span class="geo-info">${geoText}</span>`;
+                resultContainer = getContainer();
+                if (!resultContainer) return;
+                const loadingEl = resultContainer.querySelector('.geo-loading');
+                if (loadingEl) loadingEl.outerHTML = `<span class="geo-info">${geoText}</span>`;
             } catch (geoErr) {
-                resultContainer.querySelector('.geo-loading').outerHTML = '';
+                resultContainer = getContainer();
+                if (!resultContainer) return;
+                const loadingEl = resultContainer.querySelector('.geo-loading');
+                if (loadingEl) loadingEl.outerHTML = '';
             }
 
+            if (this.ipCheckSeq.get(tag) !== seq) return;
             UI.showToast(res.is_stable ? 'IP稳定' : 'IP不稳定(多个出口)', res.is_stable ? 'success' : 'info');
         } catch (err) {
-            resultContainer.innerHTML = `<span style="color: var(--error)">查询失败</span>`;
-            UI.showToast('IP查询失败', 'error');
+            if (this.ipCheckSeq.get(tag) === seq) {
+                resultContainer = getContainer();
+                if (resultContainer) {
+                    resultContainer.innerHTML = `<span style="color: var(--error)">查询失败</span>`;
+                }
+                UI.showToast('IP查询失败', 'error');
+            }
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
+            if (this.ipCheckSeq.get(tag) === seq) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
         }
     }
 
