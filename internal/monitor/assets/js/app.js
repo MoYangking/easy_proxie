@@ -5,7 +5,13 @@ class App {
     constructor() {
         this.nodes = [];
         this.loggedIn = false;
+        this.nodeHashes = new Map(); // Track node state for diff rendering
         this.init();
+    }
+
+    // Generate hash for node state to detect changes
+    getNodeHash(node) {
+        return `${node.tag}:${node.last_latency_ms}:${node.available}:${node.active_connections}:${node.failure_count}`;
     }
 
     async init() {
@@ -100,7 +106,25 @@ class App {
         }
         document.getElementById('btn-reload').addEventListener('click', () => this.handleReload());
 
-        // Node Actions Delegation
+        // Batch selection
+        const selectAllToggle = document.getElementById('toggle-select-all');
+        const batchProbeBtn = document.getElementById('btn-batch-probe');
+        const batchCountSpan = document.getElementById('batch-count');
+
+        if (selectAllToggle) {
+            selectAllToggle.addEventListener('change', () => {
+                const checkboxes = document.querySelectorAll('.node-checkbox');
+                checkboxes.forEach(cb => cb.checked = selectAllToggle.checked);
+                this.updateBatchCount();
+            });
+        }
+
+        // Batch probe button
+        if (batchProbeBtn) {
+            batchProbeBtn.addEventListener('click', () => this.batchProbe());
+        }
+
+        // Node Actions Delegation (including checkbox changes)
         document.getElementById('nodes-grid').addEventListener('click', async (e) => {
             const btn = e.target.closest('button');
             if (!btn) return;
@@ -112,6 +136,48 @@ class App {
                 await this.checkNodeIP(tag, btn);
             }
         });
+
+        document.getElementById('nodes-grid').addEventListener('change', (e) => {
+            if (e.target.classList.contains('node-checkbox')) {
+                this.updateBatchCount();
+            }
+        });
+    }
+
+    updateBatchCount() {
+        const selected = document.querySelectorAll('.node-checkbox:checked');
+        const count = selected.length;
+        const batchCountSpan = document.getElementById('batch-count');
+        const batchProbeBtn = document.getElementById('btn-batch-probe');
+
+        if (batchCountSpan) batchCountSpan.textContent = count;
+        if (batchProbeBtn) batchProbeBtn.disabled = count === 0;
+    }
+
+    getSelectedTags() {
+        return Array.from(document.querySelectorAll('.node-checkbox:checked'))
+            .map(cb => cb.dataset.tag);
+    }
+
+    async batchProbe() {
+        const tags = this.getSelectedTags();
+        if (tags.length === 0) return;
+
+        UI.showToast(`开始批量探测 ${tags.length} 个节点...`, 'info');
+
+        // Probe each node sequentially (or could batch on backend)
+        let success = 0, failed = 0;
+        for (const tag of tags) {
+            try {
+                await API.probeNode(tag);
+                success++;
+            } catch (e) {
+                failed++;
+            }
+        }
+
+        UI.showToast(`批量探测完成: 成功 ${success}, 失败 ${failed}`, success > 0 ? 'success' : 'error');
+        await this.loadData();
     }
 
     async loadConfig() {
@@ -319,30 +385,64 @@ class App {
         // Render Stats
         document.getElementById('stats-grid').innerHTML = UI.renderStats(this.nodes);
 
-        // Render Nodes (only redraw if needed or just naive redraw for now)
-        // Ideally we diff, but for < 100 nodes, replacement is fine
-        // We want to preserve open IP results if possible, but that's complex without a state store.
-        // For now, let's just re-render. Note: This clears IP checks. 
-        // Improvement: Store IP check results in this.nodes state.
-
         const grid = document.getElementById('nodes-grid');
-        // Simple optimization: if node count matches and we are just refreshing stats, maybe update in place? 
-        // For this task, we will just re-render.
+
+        // Build current node map
+        const currentNodeMap = new Map();
+        this.nodes.forEach(n => currentNodeMap.set(n.tag, n));
 
         // Preserve IP results
         const ipResults = {};
         document.querySelectorAll('.ip-result-container').forEach(el => {
-            if (el.innerHTML) ipResults[el.id] = el.innerHTML;
+            if (el.querySelector('.ip-result') || el.innerHTML.includes('查询失败')) {
+                ipResults[el.id] = { html: el.innerHTML, display: el.style.display };
+            }
         });
 
-        grid.innerHTML = this.nodes.map(n => UI.renderNodeCard(n)).join('');
+        // Get existing node cards
+        const existingCards = new Map();
+        grid.querySelectorAll('.node-card').forEach(card => {
+            existingCards.set(card.dataset.tag, card);
+        });
 
-        // Restore IP results (if node still exists)
+        // Diff-based update
+        const newHashes = new Map();
+        const fragment = document.createDocumentFragment();
+        const processedTags = new Set();
+
+        this.nodes.forEach(node => {
+            const hash = this.getNodeHash(node);
+            newHashes.set(node.tag, hash);
+            processedTags.add(node.tag);
+
+            const existingCard = existingCards.get(node.tag);
+            const oldHash = this.nodeHashes.get(node.tag);
+
+            if (existingCard && oldHash === hash) {
+                // Node unchanged - keep existing card
+                fragment.appendChild(existingCard);
+            } else {
+                // Node changed or new - create new card
+                const temp = document.createElement('div');
+                temp.innerHTML = UI.renderNodeCard(node);
+                const newCard = temp.firstElementChild;
+                fragment.appendChild(newCard);
+            }
+        });
+
+        // Clear and rebuild grid
+        grid.innerHTML = '';
+        grid.appendChild(fragment);
+
+        // Update hash map
+        this.nodeHashes = newHashes;
+
+        // Restore IP results
         Object.keys(ipResults).forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                el.innerHTML = ipResults[id];
-                el.style.display = 'block';
+                el.innerHTML = ipResults[id].html;
+                el.style.display = ipResults[id].display || 'block';
             }
         });
     }
@@ -365,16 +465,23 @@ class App {
     async checkNodeIP(tag, btn) {
         const originalText = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '查询中...';
+        btn.innerHTML = '查询中(3次)...';
 
         const resultContainer = document.getElementById(`ip-result-${tag}`);
         resultContainer.style.display = 'block';
-        resultContainer.innerHTML = '<span class="text-secondary">正在连接...</span>';
+        resultContainer.innerHTML = '<span class="text-secondary">正在采样3次...</span>';
 
         try {
             const res = await API.checkIP(tag);
-            resultContainer.innerHTML = `<div class="ip-result">IP: ${res.ip}</div>`;
-            UI.showToast('IP查询成功', 'success');
+            const stableIcon = res.is_stable ? '✅' : '⚠️';
+            const allIpsText = res.all_ips && res.all_ips.length > 1
+                ? `<div class="text-secondary" style="font-size:0.75rem; margin-top:4px">检测到: ${res.all_ips.join(', ')}</div>`
+                : '';
+            resultContainer.innerHTML = `
+                <div class="ip-result">${stableIcon} IP: ${res.ip}</div>
+                ${allIpsText}
+            `;
+            UI.showToast(res.is_stable ? 'IP稳定' : 'IP不稳定(多个出口)', res.is_stable ? 'success' : 'info');
         } catch (err) {
             resultContainer.innerHTML = `<span style="color: var(--error)">查询失败</span>`;
             UI.showToast('IP查询失败', 'error');

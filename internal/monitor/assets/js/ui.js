@@ -12,24 +12,96 @@ export class UI {
         return 'healthy';
     }
 
+    // Render mini sparkline chart for latency history
+    static renderSparkline(timeline) {
+        if (!timeline || timeline.length < 2) {
+            return '<div class="sparkline-placeholder">-</div>';
+        }
+
+        // Take last 10 entries
+        const data = timeline.slice(-10);
+        const maxLatency = Math.max(...data.map(e => e.latency_ms || 0), 100);
+        const width = 80;
+        const height = 24;
+
+        const points = data.map((e, i) => {
+            const x = (i / (data.length - 1)) * width;
+            const y = height - ((e.latency_ms || 0) / maxLatency) * (height - 4);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' ');
+
+        // Color based on latest latency
+        const latestMs = data[data.length - 1]?.latency_ms || 0;
+        const color = latestMs < 100 ? 'var(--success)' : latestMs < 400 ? 'var(--warning)' : 'var(--error)';
+
+        return `
+            <svg width="${width}" height="${height}" class="sparkline">
+                <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        `;
+    }
+
+    // Calculate health score (0-100)
+    static getHealthScore(node) {
+        let score = 100;
+
+        // Latency penalty: up to -30 for high latency
+        if (node.last_latency_ms >= 0) {
+            score -= Math.min(node.last_latency_ms / 20, 30);
+        }
+
+        // Failure penalty: up to -50 based on failure count
+        if (node.failure_count > 0) {
+            score -= Math.min(node.failure_count * 10, 50);
+        }
+
+        // Unavailable penalty
+        if (!node.available) {
+            score -= 30;
+        }
+
+        return Math.max(0, Math.round(score));
+    }
+
+    static renderHealthBadge(score) {
+        let color = 'var(--success)';
+        if (score < 50) color = 'var(--error)';
+        else if (score < 80) color = 'var(--warning)';
+
+        return `<span class="health-badge" style="background: ${color}20; color: ${color}">${score}</span>`;
+    }
+
     static renderNodeCard(node) {
         const statusClass = this.getStatusClass(node);
         const latency = node.last_latency_ms >= 0 ? node.last_latency_ms : '-';
+        const sparkline = this.renderSparkline(node.timeline);
+        const healthScore = this.getHealthScore(node);
+        const healthBadge = this.renderHealthBadge(healthScore);
 
         return `
             <div class="node-card ${statusClass}" data-tag="${node.tag}">
                 <div class="node-header">
-                    <div>
+                    <div class="node-select">
+                        <input type="checkbox" class="node-checkbox" data-tag="${node.tag}">
+                    </div>
+                    <div class="node-info">
                         <div class="node-name" title="${node.name}">${node.name}</div>
                         <div class="node-tag">${node.tag}</div>
                     </div>
-                    <div class="latency-badge">
-                        ${this.formatLatency(node.last_latency_ms)}<span class="ms">ms</span>
+                    <div class="node-stats">
+                        ${healthBadge}
+                        <div class="latency-badge">
+                            ${this.formatLatency(node.last_latency_ms)}<span class="ms">ms</span>
+                        </div>
                     </div>
                 </div>
                 
                 <div class="node-metrics">
-                   <!-- Add sparkleline or mini details here later -->
+                    ${sparkline}
+                    <div class="metric-text">
+                        <span title="Connections">🔗 ${node.active_connections || 0}</span>
+                        <span title="Failures">❌ ${node.failure_count || 0}</span>
+                    </div>
                 </div>
 
                 <div class="node-actions">
@@ -39,7 +111,6 @@ export class UI {
                     <button class="btn btn-secondary btn-xs btn-check-ip" data-tag="${node.tag}">
                         查IP
                     </button>
-                    <!-- Extra actions placeholder -->
                 </div>
                 <div class="ip-result-container" id="ip-result-${node.tag}" style="margin-top: 0.5rem; display: none;"></div>
             </div>

@@ -263,44 +263,86 @@ func (s *Server) handleCheckIP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We need the port to create a proxy client
-	// We have entry.info.ListenAddress and entry.info.Port
-	// Local proxy is at 127.0.0.1:Port usually, or ListenAddress:Port
-	
 	entry.mu.RLock()
 	port := entry.info.Port
-	// listenAddr := entry.info.ListenAddress // might be 0.0.0.0
 	entry.mu.RUnlock()
 
-    if port == 0 {
-        w.WriteHeader(http.StatusBadRequest)
+	if port == 0 {
+		w.WriteHeader(http.StatusBadRequest)
 		writeJSON(w, map[string]any{"error": "Node has no port assigned"})
 		return
-    }
+	}
 
 	// Create a client that uses this proxy
 	proxyUrl, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyUrl),
-            TLSClientConfig: &tls.Config{InsecureSkipVerify: s.cfg.SkipCertVerify},
+			Proxy:           http.ProxyURL(proxyUrl),
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: s.cfg.SkipCertVerify},
 		},
-		Timeout: 10 * time.Second,
+		Timeout: 8 * time.Second,
 	}
 
-	// Use an IP echo service
-	// Using a few fallbacks or just one reliable one?
-	// ipify is good.
+	// Multi-sample: check IP 3 times to get reliable result
+	const sampleCount = 3
+	ipCounts := make(map[string]int)
+	var allIPs []string
+	var lastErr error
+
+	for i := 0; i < sampleCount; i++ {
+		ip, err := s.fetchExternalIP(client)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		ipCounts[ip]++
+		// Track unique IPs in order of appearance
+		found := false
+		for _, existingIP := range allIPs {
+			if existingIP == ip {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allIPs = append(allIPs, ip)
+		}
+	}
+
+	if len(ipCounts) == 0 {
+		w.WriteHeader(http.StatusBadGateway)
+		writeJSON(w, map[string]any{"error": fmt.Sprintf("IP检测失败: %v", lastErr)})
+		return
+	}
+
+	// Find majority IP (most frequent)
+	var majorityIP string
+	maxCount := 0
+	for ip, count := range ipCounts {
+		if count > maxCount {
+			maxCount = count
+			majorityIP = ip
+		}
+	}
+
+	writeJSON(w, map[string]any{
+		"ip":        majorityIP,
+		"tag":       req.Tag,
+		"samples":   len(ipCounts),
+		"all_ips":   allIPs,
+		"is_stable": len(allIPs) == 1,
+	})
+}
+
+// fetchExternalIP makes a single request to get external IP
+func (s *Server) fetchExternalIP(client *http.Client) (string, error) {
 	resp, err := client.Get("https://api.ipify.org?format=json")
 	if err != nil {
-		// Try http if https fails
+		// Fallback to HTTP
 		resp, err = client.Get("http://api.ipify.org?format=json")
 	}
-	
 	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		writeJSON(w, map[string]any{"error": fmt.Sprintf("Failed to check IP: %v", err)})
-		return
+		return "", err
 	}
 	defer resp.Body.Close()
 
@@ -308,16 +350,9 @@ func (s *Server) handleCheckIP(w http.ResponseWriter, r *http.Request) {
 		IP string `json:"ip"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&ipResp); err != nil {
-         // Maybe text response?
-         w.WriteHeader(http.StatusBadGateway)
-         writeJSON(w, map[string]any{"error": "Invalid response from IP service"})
-         return
+		return "", err
 	}
-
-	writeJSON(w, map[string]any{
-		"ip": ipResp.IP,
-        "tag": req.Tag,
-	})
+	return ipResp.IP, nil
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
