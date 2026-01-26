@@ -420,15 +420,19 @@ class App {
         try {
             await API.reload();
             if (notify) UI.showToast('System Reloaded', 'success');
-            await this.loadData();
+            if (this.loggedIn) {
+                await this.loadData();
+                this.connectWebSocket();
+            }
         } catch (e) {
             UI.showToast(e.message, 'error');
         }
     }
 
     async loadData() {
+        if (!this.loggedIn) return;
         try {
-            const data = await API.getNodes(false); // Get filtered active nodes usually, assuming API default
+            const data = await API.getNodes(true); // Get ALL nodes, including failed ones
             this.nodes = data.nodes || [];
             this.render();
         } catch (err) {

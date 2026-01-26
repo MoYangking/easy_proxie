@@ -131,6 +131,7 @@ func newPool(ctx context.Context, _ adapter.Router, logger log.ContextLogger, ta
 				logger.Info("registered node: ", memberTag)
 				// Set probe and release functions immediately
 				entry.SetRelease(p.makeReleaseByTagFunc(memberTag))
+				entry.SetDialer(p.makeDialerByTagFunc(memberTag))
 				if probeFn := p.makeProbeByTagFunc(memberTag); probeFn != nil {
 					entry.SetProbe(probeFn)
 				}
@@ -224,6 +225,7 @@ func (p *poolOutbound) initializeMembersLocked() error {
 				state.attachEntry(entry)
 				member.entry = entry
 				entry.SetRelease(p.makeReleaseFunc(member))
+				entry.SetDialer(p.makeDialerFunc(member))
 				if probe := p.makeProbeFunc(member); probe != nil {
 					entry.SetProbe(probe)
 				}
@@ -669,6 +671,92 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 func (p *poolOutbound) makeReleaseByTagFunc(tag string) func() {
 	return func() {
 		releaseSharedMember(tag)
+	}
+}
+
+func (p *poolOutbound) makeDialerFunc(member *memberState) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		// Use DialContext on the specific outbound adapter
+		// Note: addr should be host:port
+		// We use TCP for checking IP via HTTP proxy
+		// But here we implement generic Dial
+		
+		// Parse destination address
+		// sing-box expects M.Socksaddr
+		// We assume network is TCP/UDP
+		
+		host, portStr, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		port, err := net.LookupPort(network, portStr)
+		if err != nil {
+			return nil, err
+		}
+		
+		dest := M.Socksaddr{
+			Fqdn: host,
+			Port: uint16(port),
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			dest.Fqdn = ""
+			dest.Addr = M.AddrFromIP(ip)
+		}
+
+		conn, err := member.outbound.DialContext(ctx, network, dest)
+		if err != nil {
+			return nil, err
+		}
+		return conn, nil
+	}
+}
+
+func (p *poolOutbound) makeDialerByTagFunc(tag string) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		// Ensure initialized
+		p.mu.Lock()
+		if len(p.members) == 0 {
+			if err := p.initializeMembersLocked(); err != nil {
+				p.mu.Unlock()
+				return nil, err
+			}
+		}
+		var member *memberState
+		for _, m := range p.members {
+			if m.tag == tag {
+				member = m
+				break
+			}
+		}
+		p.mu.Unlock()
+
+		if member == nil {
+			return nil, E.New("member not found: ", tag)
+		}
+
+		host, portStr, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		port, err := net.LookupPort(network, portStr)
+		if err != nil {
+			return nil, err
+		}
+		
+		dest := M.Socksaddr{
+			Fqdn: host,
+			Port: uint16(port),
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			dest.Fqdn = ""
+			dest.Addr = M.AddrFromIP(ip)
+		}
+
+		conn, err := member.outbound.DialContext(ctx, network, dest)
+		if err != nil {
+			return nil, err
+		}
+		return conn, nil
 	}
 }
 

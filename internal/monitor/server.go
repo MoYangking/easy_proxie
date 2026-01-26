@@ -277,20 +277,23 @@ func (s *Server) handleCheckIP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entry.mu.RLock()
-	port := entry.info.Port
+	// port := entry.info.Port // No longer needed for internal dialing
 	entry.mu.RUnlock()
 
-	if port == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": "Node has no port assigned"})
-		return
+	// Use internal dialer if available to bypass listener port conflicts (pool mode)
+	dialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := entry.Dial(ctx, network, addr)
+		if err != nil {
+			// Fallback to direct dial if entry has no dialer (e.g. not initialized properly)
+			// But since we register it in pool, it should exist.
+			return nil, err
+		}
+		return conn, nil
 	}
 
-	// Create a client that uses this proxy
-	proxyUrl, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy:           http.ProxyURL(proxyUrl),
+			DialContext: dialer,
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: s.cfg.SkipCertVerify},
 		},
 		Timeout: 8 * time.Second,

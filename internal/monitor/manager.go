@@ -69,6 +69,7 @@ type Snapshot struct {
 
 type probeFunc func(ctx context.Context) (time.Duration, error)
 type releaseFunc func()
+type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 type EntryHandle struct {
 	ref *entry
@@ -88,6 +89,7 @@ type entry struct {
 	lastProbe        time.Duration
 	active           atomic.Int32
 	probe            probeFunc
+	dialer           dialFunc
 	release          releaseFunc
 	initialCheckDone bool
 	available        bool
@@ -557,6 +559,22 @@ func (e *entry) setRelease(fn releaseFunc) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.release = fn
+}
+
+func (e *entry) setDialer(fn dialFunc) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.dialer = fn
+}
+
+func (e *entry) dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	e.mu.RLock()
+	fn := e.dialer
+	e.mu.RUnlock()
+	if fn == nil {
+		return nil, errors.New("no dialer configured for this node")
+	}
+	return fn(ctx, network, addr)
 }
 
 func (e *entry) recordProbeLatency(d time.Duration) {
