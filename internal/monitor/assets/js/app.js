@@ -8,7 +8,123 @@ class App {
         this.nodeHashes = new Map(); // Track node state for diff rendering
         this.ws = null;
         this.wsReconnectTimer = null;
+        this.filter = 'all'; // Current filter: all, available, unavailable
         this.init();
+    }
+
+    // ... (existing code)
+
+    bindEvents() {
+        // ... (existing events)
+
+        // Filter Tabs
+        document.querySelectorAll('.filter-tab').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget; // btn itself if icon clicked
+
+                // Update active class
+                document.querySelectorAll('.filter-tab').forEach(b => {
+                    b.className = b.className.replace(' btn-primary', ' btn-secondary').replace(' active', '');
+                });
+                target.className = target.className.replace(' btn-secondary', ' btn-primary') + ' active';
+
+                this.filter = target.dataset.filter;
+                this.render();
+            });
+        });
+    }
+
+    // ...
+
+    render() {
+        // Render Stats
+        document.getElementById('stats-grid').innerHTML = UI.renderStats(this.nodes);
+
+        // Filter nodes based on current tab
+        let filteredNodes = this.nodes;
+        if (this.filter === 'available') {
+            filteredNodes = this.nodes.filter(n => n.available);
+        } else if (this.filter === 'unavailable') {
+            filteredNodes = this.nodes.filter(n => !n.available);
+        }
+
+        // Update counts
+        const countAll = this.nodes.length;
+        const countAvail = this.nodes.filter(n => n.available).length;
+        const countUnavail = countAll - countAvail;
+        document.getElementById('count-all').textContent = countAll;
+        document.getElementById('count-available').textContent = countAvail;
+        document.getElementById('count-unavailable').textContent = countUnavail;
+
+        const grid = document.getElementById('nodes-grid');
+
+        // Build current node map (from filtered list)
+        const currentNodeMap = new Map();
+        filteredNodes.forEach(n => currentNodeMap.set(n.tag, n));
+
+        // Preserve IP results
+        const ipResults = {};
+        document.querySelectorAll('.ip-result-container').forEach(el => {
+            if (el.querySelector('.ip-result') || el.innerHTML.includes('查询失败')) {
+                ipResults[el.id] = { html: el.innerHTML, display: el.style.display };
+            }
+        });
+
+        // Get existing node cards
+        const existingCards = new Map();
+        grid.querySelectorAll('.node-card').forEach(card => {
+            existingCards.set(card.dataset.tag, card);
+        });
+
+        // Remove cards not in filtered list
+        existingCards.forEach((card, tag) => {
+            if (!currentNodeMap.has(tag)) {
+                card.remove();
+            }
+        });
+
+        // Diff-based update
+        const newHashes = new Map();
+        const fragment = document.createDocumentFragment();
+        const processedTags = new Set();
+
+        // Sort filteredNodes: available first, then by latency
+        // (Assuming backend already sorts, but filtering preserves order)
+
+        filteredNodes.forEach(node => {
+            const hash = this.getNodeHash(node);
+            newHashes.set(node.tag, hash);
+            processedTags.add(node.tag);
+
+            const existingCard = existingCards.get(node.tag);
+            const oldHash = this.nodeHashes.get(node.tag);
+            if (existingCard && oldHash === hash) {
+                // Node unchanged - keep existing card
+                fragment.appendChild(existingCard);
+            } else {
+                // Node changed or new - create new card
+                const temp = document.createElement('div');
+                temp.innerHTML = UI.renderNodeCard(node);
+                const newCard = temp.firstElementChild;
+                fragment.appendChild(newCard);
+            }
+        });
+
+        // Clear and rebuild grid
+        grid.innerHTML = '';
+        grid.appendChild(fragment);
+
+        // Update hash map
+        this.nodeHashes = newHashes;
+
+        // Restore IP results
+        Object.keys(ipResults).forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.innerHTML = ipResults[id].html;
+                el.style.display = ipResults[id].display || 'block';
+            }
+        });
     }
 
     // Generate hash for node state to detect changes
@@ -117,7 +233,20 @@ class App {
     }
 
     bindEvents() {
-        // Tabs
+        // Filter Tabs
+        document.querySelectorAll('.filter-tab').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget;
+                document.querySelectorAll('.filter-tab').forEach(b => {
+                    b.className = b.className.replace(' btn-primary', ' btn-secondary').replace(' active', '');
+                });
+                target.className = target.className.replace(' btn-secondary', ' btn-primary') + ' active';
+                this.filter = target.dataset.filter;
+                this.render();
+            });
+        });
+
+        // Tabs (Main Navigation)
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 const tabName = e.target.dataset.tab;
@@ -441,71 +570,7 @@ class App {
         }
     }
 
-    render() {
-        // Render Stats
-        document.getElementById('stats-grid').innerHTML = UI.renderStats(this.nodes);
 
-        const grid = document.getElementById('nodes-grid');
-
-        // Build current node map
-        const currentNodeMap = new Map();
-        this.nodes.forEach(n => currentNodeMap.set(n.tag, n));
-
-        // Preserve IP results
-        const ipResults = {};
-        document.querySelectorAll('.ip-result-container').forEach(el => {
-            if (el.querySelector('.ip-result') || el.innerHTML.includes('查询失败')) {
-                ipResults[el.id] = { html: el.innerHTML, display: el.style.display };
-            }
-        });
-
-        // Get existing node cards
-        const existingCards = new Map();
-        grid.querySelectorAll('.node-card').forEach(card => {
-            existingCards.set(card.dataset.tag, card);
-        });
-
-        // Diff-based update
-        const newHashes = new Map();
-        const fragment = document.createDocumentFragment();
-        const processedTags = new Set();
-
-        this.nodes.forEach(node => {
-            const hash = this.getNodeHash(node);
-            newHashes.set(node.tag, hash);
-            processedTags.add(node.tag);
-
-            const existingCard = existingCards.get(node.tag);
-            const oldHash = this.nodeHashes.get(node.tag);
-
-            if (existingCard && oldHash === hash) {
-                // Node unchanged - keep existing card
-                fragment.appendChild(existingCard);
-            } else {
-                // Node changed or new - create new card
-                const temp = document.createElement('div');
-                temp.innerHTML = UI.renderNodeCard(node);
-                const newCard = temp.firstElementChild;
-                fragment.appendChild(newCard);
-            }
-        });
-
-        // Clear and rebuild grid
-        grid.innerHTML = '';
-        grid.appendChild(fragment);
-
-        // Update hash map
-        this.nodeHashes = newHashes;
-
-        // Restore IP results
-        Object.keys(ipResults).forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                el.innerHTML = ipResults[id].html;
-                el.style.display = ipResults[id].display || 'block';
-            }
-        });
-    }
 
     async probeNode(tag, btn) {
         btn.disabled = true;

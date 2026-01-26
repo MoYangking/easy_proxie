@@ -90,6 +90,8 @@ type entry struct {
 	active           atomic.Int32
 	probe            probeFunc
 	dialer           dialFunc
+	onFailure        func(error)
+	onSuccess        func()
 	release          releaseFunc
 	initialCheckDone bool
 	available        bool
@@ -489,6 +491,11 @@ func (e *entry) recordFailure(err error) {
 	e.lastError = errStr
 	e.lastFail = time.Now()
 	e.appendTimelineLocked(false, 0, errStr)
+	
+	if e.onFailure != nil {
+		// Call in separate goroutine to avoid blocking or deadlock
+		go e.onFailure(err)
+	}
 }
 
 func (e *entry) recordSuccess() {
@@ -497,6 +504,10 @@ func (e *entry) recordSuccess() {
 	e.success++
 	e.lastOK = time.Now()
 	e.appendTimelineLocked(true, 0, "")
+	
+	if e.onSuccess != nil {
+		go e.onSuccess()
+	}
 }
 
 func (e *entry) recordSuccessWithLatency(latency time.Duration) {
@@ -565,6 +576,18 @@ func (e *entry) setDialer(fn dialFunc) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.dialer = fn
+}
+
+func (e *entry) setOnFailure(fn func(error)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.onFailure = fn
+}
+
+func (e *entry) setOnSuccess(fn func()) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.onSuccess = fn
 }
 
 func (e *entry) dial(ctx context.Context, network, addr string) (net.Conn, error) {

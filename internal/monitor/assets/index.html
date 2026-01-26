@@ -80,6 +80,14 @@
             <div class="views-container">
                 <!-- Monitor View -->
                 <div class="view active" id="view-monitor">
+                    <div class="sub-tabs" style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
+                        <button class="btn btn-sm btn-primary filter-tab active" data-filter="all">全部 <span
+                                id="count-all" class="badge">0</span></button>
+                        <button class="btn btn-sm btn-secondary filter-tab" data-filter="available">可用 <span
+                                id="count-available" class="badge">0</span></button>
+                        <button class="btn btn-sm btn-secondary filter-tab" data-filter="unavailable">不可用 <span
+                                id="count-unavailable" class="badge">0</span></button>
+                    </div>
                     <div class="nodes-grid" id="nodes-grid">
                         <!-- Nodes Injected via JS -->
                     </div>

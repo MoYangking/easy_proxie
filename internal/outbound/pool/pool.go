@@ -132,6 +132,15 @@ func newPool(ctx context.Context, _ adapter.Router, logger log.ContextLogger, ta
 				// Set probe and release functions immediately
 				entry.SetRelease(p.makeReleaseByTagFunc(memberTag))
 				entry.SetDialer(p.makeDialerByTagFunc(memberTag))
+				entry.SetOnFailure(func(err error) {
+					// Need to access shared state by tag since member struct isn't fully ready here in newPool?
+					// Actually, we have acquireSharedState(memberTag) "state" variable available in scope above!
+					// But we are inside newPool loop.
+					state.recordFailure(err, normalized.FailureThreshold, normalized.BlacklistDuration)
+				})
+				entry.SetOnSuccess(func() {
+					state.recordSuccess()
+				})
 				if probeFn := p.makeProbeByTagFunc(memberTag); probeFn != nil {
 					entry.SetProbe(probeFn)
 				}
@@ -226,6 +235,16 @@ func (p *poolOutbound) initializeMembersLocked() error {
 				member.entry = entry
 				entry.SetRelease(p.makeReleaseFunc(member))
 				entry.SetDialer(p.makeDialerFunc(member))
+				entry.SetOnFailure(func(err error) {
+					if member.shared != nil {
+						member.shared.recordFailure(err, p.options.FailureThreshold, p.options.BlacklistDuration)
+					}
+				})
+				entry.SetOnSuccess(func() {
+					if member.shared != nil {
+						member.shared.recordSuccess()
+					}
+				})
 				if probe := p.makeProbeFunc(member); probe != nil {
 					entry.SetProbe(probe)
 				}
