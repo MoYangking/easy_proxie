@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -773,9 +774,22 @@ func (s *Server) handleProbeAll(w http.ResponseWriter, r *http.Request) {
 	}
 	results := make(chan probeResult, total)
 
-	// Launch all probes concurrently
+	// Limit concurrency to prevent CPU spikes
+	workerLimit := runtime.NumCPU() * 4
+	if workerLimit > 32 {
+		workerLimit = 32
+	}
+	if workerLimit < 4 {
+		workerLimit = 4
+	}
+	sem := make(chan struct{}, workerLimit)
+
+	// Launch all probes concurrently (limited by semaphore)
 	for _, snap := range snapshots {
 		go func(snap Snapshot, mgr *Manager) {
+			sem <- struct{}{} // Acquire token
+			defer func() { <-sem }() // Release token
+
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			defer cancel()
 			latency, err := mgr.Probe(ctx, snap.Tag)
@@ -790,7 +804,7 @@ func (s *Server) handleProbeAll(w http.ResponseWriter, r *http.Request) {
 	// Collect results as they come in with overall timeout
 	successCount := 0
 	failedCount := 0
-	timeout := time.After(30 * time.Second) // Overall timeout for all probes
+	timeout := time.After(60 * time.Second) // Increased overall timeout for throttled probes
 
 	for i := 0; i < total; i++ {
 		select {

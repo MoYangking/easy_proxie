@@ -230,8 +230,8 @@ func (m *Manager) probeAllNodes(timeout time.Duration) {
 	}
 
 	workerLimit := runtime.NumCPU() * 2
-	if workerLimit < 8 {
-		workerLimit = 8
+	if workerLimit < 2 {
+		workerLimit = 2
 	}
 	sem := make(chan struct{}, workerLimit)
 	var wg sync.WaitGroup
