@@ -678,6 +678,38 @@ func (h *EntryHandle) SetRelease(fn func()) {
 	h.ref.setRelease(fn)
 }
 
+// SetDialer assigns a dialer function.
+func (h *EntryHandle) SetDialer(fn dialFunc) {
+	if h == nil || h.ref == nil {
+		return
+	}
+	h.ref.setDialer(fn)
+}
+
+// SetOnFailure assigns a failure callback.
+func (h *EntryHandle) SetOnFailure(fn func(error)) {
+	if h == nil || h.ref == nil {
+		return
+	}
+	h.ref.setOnFailure(fn)
+}
+
+// SetOnSuccess assigns a success callback.
+func (h *EntryHandle) SetOnSuccess(fn func()) {
+	if h == nil || h.ref == nil {
+		return
+	}
+	h.ref.setOnSuccess(fn)
+}
+
+// Dial establishes a connection using the node's dialer.
+func (h *EntryHandle) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	if h == nil || h.ref == nil {
+		return nil, errors.New("nil entry reference")
+	}
+	return h.ref.dial(ctx, network, addr)
+}
+
 // MarkInitialCheckDone marks the initial health check as completed.
 func (h *EntryHandle) MarkInitialCheckDone(available bool) {
 	if h == nil || h.ref == nil {
