@@ -69,7 +69,6 @@ type Snapshot struct {
 
 type probeFunc func(ctx context.Context) (time.Duration, error)
 type releaseFunc func()
-type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 type EntryHandle struct {
 	ref *entry
@@ -89,9 +88,6 @@ type entry struct {
 	lastProbe        time.Duration
 	active           atomic.Int32
 	probe            probeFunc
-	dialer           dialFunc
-	onFailure        func(error)
-	onSuccess        func()
 	release          releaseFunc
 	initialCheckDone bool
 	available        bool
@@ -230,8 +226,8 @@ func (m *Manager) probeAllNodes(timeout time.Duration) {
 	}
 
 	workerLimit := runtime.NumCPU() * 2
-	if workerLimit < 2 {
-		workerLimit = 2
+	if workerLimit < 8 {
+		workerLimit = 8
 	}
 	sem := make(chan struct{}, workerLimit)
 	var wg sync.WaitGroup
@@ -491,11 +487,6 @@ func (e *entry) recordFailure(err error) {
 	e.lastError = errStr
 	e.lastFail = time.Now()
 	e.appendTimelineLocked(false, 0, errStr)
-	
-	if e.onFailure != nil {
-		// Call in separate goroutine to avoid blocking or deadlock
-		go e.onFailure(err)
-	}
 }
 
 func (e *entry) recordSuccess() {
@@ -504,10 +495,6 @@ func (e *entry) recordSuccess() {
 	e.success++
 	e.lastOK = time.Now()
 	e.appendTimelineLocked(true, 0, "")
-	
-	if e.onSuccess != nil {
-		go e.onSuccess()
-	}
 }
 
 func (e *entry) recordSuccessWithLatency(latency time.Duration) {
@@ -570,34 +557,6 @@ func (e *entry) setRelease(fn releaseFunc) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.release = fn
-}
-
-func (e *entry) setDialer(fn dialFunc) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.dialer = fn
-}
-
-func (e *entry) setOnFailure(fn func(error)) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.onFailure = fn
-}
-
-func (e *entry) setOnSuccess(fn func()) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.onSuccess = fn
-}
-
-func (e *entry) dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	e.mu.RLock()
-	fn := e.dialer
-	e.mu.RUnlock()
-	if fn == nil {
-		return nil, errors.New("no dialer configured for this node")
-	}
-	return fn(ctx, network, addr)
 }
 
 func (e *entry) recordProbeLatency(d time.Duration) {
@@ -676,38 +635,6 @@ func (h *EntryHandle) SetRelease(fn func()) {
 		return
 	}
 	h.ref.setRelease(fn)
-}
-
-// SetDialer assigns a dialer function.
-func (h *EntryHandle) SetDialer(fn dialFunc) {
-	if h == nil || h.ref == nil {
-		return
-	}
-	h.ref.setDialer(fn)
-}
-
-// SetOnFailure assigns a failure callback.
-func (h *EntryHandle) SetOnFailure(fn func(error)) {
-	if h == nil || h.ref == nil {
-		return
-	}
-	h.ref.setOnFailure(fn)
-}
-
-// SetOnSuccess assigns a success callback.
-func (h *EntryHandle) SetOnSuccess(fn func()) {
-	if h == nil || h.ref == nil {
-		return
-	}
-	h.ref.setOnSuccess(fn)
-}
-
-// Dial establishes a connection using the node's dialer.
-func (h *EntryHandle) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	if h == nil || h.ref == nil {
-		return nil, errors.New("nil entry reference")
-	}
-	return h.ref.dial(ctx, network, addr)
 }
 
 // MarkInitialCheckDone marks the initial health check as completed.
