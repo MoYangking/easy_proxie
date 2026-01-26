@@ -17,6 +17,7 @@ type sharedMemberState struct {
 	blacklistedUntil time.Time
 	entry            atomic.Pointer[monitor.EntryHandle]
 	active           atomic.Int32
+	lastLatency      atomic.Int64 // Caches the last known latency in ms
 }
 
 var sharedStateStore sync.Map // map[tag]*sharedMemberState
@@ -27,6 +28,7 @@ func acquireSharedState(tag string) *sharedMemberState {
 		return v.(*sharedMemberState)
 	}
 	state := &sharedMemberState{}
+	state.lastLatency.Store(-1) // Init with -1 (unknown)
 	actual, _ := sharedStateStore.LoadOrStore(tag, state)
 	return actual.(*sharedMemberState)
 }
@@ -95,6 +97,12 @@ func (s *sharedMemberState) recordSuccess() {
 	}
 }
 
+// recordSuccessWithLatency updates success and records latency cache
+func (s *sharedMemberState) recordSuccessWithLatency(latency time.Duration) {
+	s.recordSuccess()
+	s.lastLatency.Store(latency.Milliseconds())
+}
+
 // isBlacklisted checks if the node is currently blacklisted, auto-clearing if expired.
 func (s *sharedMemberState) isBlacklisted(now time.Time) bool {
 	s.mu.Lock()
@@ -142,6 +150,10 @@ func (s *sharedMemberState) decActive() {
 
 func (s *sharedMemberState) activeCount() int32 {
 	return s.active.Load()
+}
+
+func (s *sharedMemberState) getLastLatency() int64 {
+	return s.lastLatency.Load()
 }
 
 // releaseSharedMember clears blacklist state for a tag (called from release functions).

@@ -6,6 +6,15 @@ export class UI {
         return `<span style="color: var(--error)">${ms}</span>`;
     }
 
+    // Convert country code to flag emoji
+    static countryFlag(countryCode) {
+        if (!countryCode || countryCode.length !== 2) return '🌍';
+        const offset = 127397;
+        const firstChar = countryCode.toUpperCase().charCodeAt(0);
+        const secondChar = countryCode.toUpperCase().charCodeAt(1);
+        return String.fromCodePoint(firstChar + offset) + String.fromCodePoint(secondChar + offset);
+    }
+
     static getStatusClass(node) {
         if (!node.available) return 'error';
         if (node.last_latency_ms > 400) return 'warning';
@@ -170,6 +179,7 @@ export class UI {
                     <option value="sequential" ${data.pool_mode === 'sequential' ? 'selected' : ''}>顺序轮询 (Sequential)</option>
                     <option value="random" ${data.pool_mode === 'random' ? 'selected' : ''}>随机 (Random)</option>
                     <option value="balance" ${data.pool_mode === 'balance' ? 'selected' : ''}>最少连接 (Least Conn)</option>
+                    <option value="smart" ${data.pool_mode === 'smart' ? 'selected' : ''}>🧠 智能调度 (Smart)</option>
                 </select>
             </div>
             

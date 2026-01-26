@@ -32,6 +32,7 @@ const (
 	modeSequential = "sequential"
 	modeRandom     = "random"
 	modeBalance    = "balance"
+	modeSmart      = "smart"
 )
 
 // Options controls pool outbound behaviour.
@@ -159,6 +160,8 @@ func normalizeOptions(options Options) Options {
 		options.Mode = modeRandom
 	case modeBalance:
 		options.Mode = modeBalance
+	case modeSmart:
+		options.Mode = modeSmart
 	default:
 		options.Mode = modeSequential
 	}
@@ -298,6 +301,10 @@ func (p *poolOutbound) probeAllMembersOnStartup() {
 		latencyMs := latency.Milliseconds()
 		p.logger.Info("initial probe success for ", member.tag, ", latency: ", latencyMs, "ms")
 		availableCount++
+		
+		if member.shared != nil {
+			member.shared.recordSuccessWithLatency(latency)
+		}
 		if member.entry != nil {
 			member.entry.RecordSuccessWithLatency(latency)
 			member.entry.MarkInitialCheckDone(true)
@@ -430,6 +437,51 @@ func (p *poolOutbound) selectMember(candidates []*memberState) *memberState {
 			}
 		}
 		return selected
+	case modeSmart:
+		// Smart scheduling: weighted random based on inverse latency
+		// Weight = 10000.0 / (latency_ms + 10.0)
+		// Lower latency -> higher probability
+		
+		var totalWeight float64
+		weights := make([]float64, len(candidates))
+
+		p.rngMu.Lock()
+		defer p.rngMu.Unlock()
+
+		for i, member := range candidates {
+			var latency int64 = 200 // Default to 200ms if unknown
+			if member.shared != nil {
+				if l := member.shared.getLastLatency(); l >= 0 {
+					latency = l
+				}
+			}
+			
+			// Protect against 0 or negative latency (though 0 is possible for localhost)
+			if latency < 0 { latency = 0 }
+			
+			// Simple inverse weight function
+			// Latency 10ms -> Weight 10000/20 = 500
+			// Latency 200ms -> Weight 10000/210 = 47
+			// Latency 1000ms -> Weight 10000/1010 = 9.9
+			weight := 10000.0 / float64(latency + 10)
+			weights[i] = weight
+			totalWeight += weight
+		}
+
+		if totalWeight <= 0 {
+			return candidates[0]
+		}
+
+		r := p.rng.Float64() * totalWeight
+		var current float64
+		for i, w := range weights {
+			current += w
+			if r <= current {
+				return candidates[i]
+			}
+		}
+		// Fallback (rounding errors)
+		return candidates[0]
 	default:
 		idx := int(p.rrCounter.Add(1)-1) % len(candidates)
 		return candidates[idx]
@@ -537,6 +589,10 @@ func (p *poolOutbound) makeProbeFunc(member *memberState) func(ctx context.Conte
 
 		// Total duration = dial time + HTTP probe
 		duration := time.Since(start)
+		
+		if member.shared != nil {
+			member.shared.recordSuccessWithLatency(duration)
+		}
 		if member.entry != nil {
 			member.entry.RecordSuccessWithLatency(duration)
 		}
@@ -598,6 +654,10 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 
 		// Total duration = dial time + TTFB
 		duration := time.Since(start)
+		
+		if member.shared != nil {
+			member.shared.recordSuccessWithLatency(duration)
+		}
 		if member.entry != nil {
 			member.entry.RecordSuccessWithLatency(duration)
 		}

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"easy_proxies/internal/config"
+
+	"github.com/coder/websocket"
 )
 
 //go:embed assets/*
@@ -76,6 +78,10 @@ type Server struct {
 
 	subMu     sync.RWMutex
 	subStatus SubscriptionStatus // subRefresher 不存在时的手动刷新状态
+
+	// WebSocket clients
+	wsMu      sync.RWMutex
+	wsClients map[*websocket.Conn]struct{}
 }
 
 // NewServer constructs a server; it can be nil when disabled.
@@ -86,7 +92,12 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
-	s := &Server{cfg: cfg, mgr: mgr, logger: logger}
+	s := &Server{
+		cfg:       cfg,
+		mgr:       mgr,
+		logger:    logger,
+		wsClients: make(map[*websocket.Conn]struct{}),
+	}
 
 	// 生成随机 session token
 	tokenBytes := make([]byte, 32)
@@ -95,6 +106,7 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/api/auth", s.handleAuth)
 	mux.HandleFunc("/api/settings", s.withAuth(s.handleSettings))
 	mux.HandleFunc("/api/proxy/auth", s.withAuth(s.handleProxyAuth))
@@ -103,6 +115,7 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/nodes/config/", s.withAuth(s.handleConfigNodeItem))
 	mux.HandleFunc("/api/nodes/probe-all", s.withAuth(s.handleProbeAll))
 	mux.HandleFunc("/api/nodes/check-ip", s.withAuth(s.handleCheckIP))
+	mux.HandleFunc("/api/nodes/geoip", s.withAuth(s.handleGeoIP))
 	mux.HandleFunc("/api/nodes/delete-failed", s.withAuth(s.handleDeleteFailedNodes))
 	mux.HandleFunc("/api/nodes/", s.withAuth(s.handleNodeAction))
 	mux.HandleFunc("/api/debug", s.withAuth(s.handleDebug))
@@ -353,6 +366,150 @@ func (s *Server) fetchExternalIP(client *http.Client) (string, error) {
 		return "", err
 	}
 	return ipResp.IP, nil
+}
+
+// handleWebSocket handles WebSocket connections for real-time updates
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true, // Allow cross-origin for dev
+	})
+	if err != nil {
+		s.logger.Printf("WebSocket accept error: %v", err)
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// Register client
+	s.wsMu.Lock()
+	s.wsClients[conn] = struct{}{}
+	s.wsMu.Unlock()
+
+	defer func() {
+		s.wsMu.Lock()
+		delete(s.wsClients, conn)
+		s.wsMu.Unlock()
+	}()
+
+	ctx := r.Context()
+
+	// Send initial data
+	nodes := s.mgr.Snapshot()
+	s.sendWSMessage(conn, map[string]any{"type": "init", "nodes": nodes})
+
+	// Keep connection alive and handle incoming messages
+	for {
+		_, _, err := conn.Read(ctx)
+		if err != nil {
+			break // Client disconnected
+		}
+	}
+}
+
+// sendWSMessage sends JSON message to a WebSocket client
+func (s *Server) sendWSMessage(conn *websocket.Conn, msg any) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return conn.Write(ctx, websocket.MessageText, data)
+}
+
+// BroadcastNodeUpdate sends node update to all connected WebSocket clients
+func (s *Server) BroadcastNodeUpdate(node Snapshot) {
+	s.wsMu.RLock()
+	defer s.wsMu.RUnlock()
+
+	msg := map[string]any{"type": "node_update", "node": node}
+	for conn := range s.wsClients {
+		go s.sendWSMessage(conn, msg)
+	}
+}
+
+// BroadcastNodesRefresh sends full node list to all clients
+func (s *Server) BroadcastNodesRefresh() {
+	s.wsMu.RLock()
+	defer s.wsMu.RUnlock()
+
+	nodes := s.mgr.Snapshot()
+	msg := map[string]any{"type": "refresh", "nodes": nodes}
+	for conn := range s.wsClients {
+		go s.sendWSMessage(conn, msg)
+	}
+}
+
+// GeoIP cache
+var (
+	geoCache   = make(map[string]*geoIPResult)
+	geoCacheMu sync.RWMutex
+)
+
+type geoIPResult struct {
+	Country   string    `json:"country"`
+	City      string    `json:"city"`
+	CountryCode string  `json:"country_code"`
+	Timestamp time.Time `json:"-"`
+}
+
+// handleGeoIP returns geolocation for a given IP
+func (s *Server) handleGeoIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]any{"error": "Missing ip parameter"})
+		return
+	}
+
+	// Check cache (1 hour TTL)
+	geoCacheMu.RLock()
+	cached, ok := geoCache[ip]
+	geoCacheMu.RUnlock()
+	if ok && time.Since(cached.Timestamp) < time.Hour {
+		writeJSON(w, cached)
+		return
+	}
+
+	// Query external GeoIP API
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,city", ip))
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		writeJSON(w, map[string]any{"error": "GeoIP lookup failed"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var apiResp struct {
+		Status      string `json:"status"`
+		Country     string `json:"country"`
+		CountryCode string `json:"countryCode"`
+		City        string `json:"city"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil || apiResp.Status != "success" {
+		w.WriteHeader(http.StatusBadGateway)
+		writeJSON(w, map[string]any{"error": "Invalid GeoIP response"})
+		return
+	}
+
+	result := &geoIPResult{
+		Country:     apiResp.Country,
+		City:        apiResp.City,
+		CountryCode: apiResp.CountryCode,
+		Timestamp:   time.Now(),
+	}
+
+	// Cache result
+	geoCacheMu.Lock()
+	geoCache[ip] = result
+	geoCacheMu.Unlock()
+
+	writeJSON(w, result)
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -859,9 +1016,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				val = "random"
 			case "balance":
 				val = "balance"
+			case "smart":
+				val = "smart" // Latency-weighted random selection
 			default:
 				w.WriteHeader(http.StatusBadRequest)
-				writeJSON(w, map[string]any{"error": "pool_mode 只支持 sequential/random/balance"})
+				writeJSON(w, map[string]any{"error": "pool_mode 只支持 sequential/random/balance/smart"})
 				return
 			}
 			poolMode = &val

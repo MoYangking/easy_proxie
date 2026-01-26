@@ -6,6 +6,8 @@ class App {
         this.nodes = [];
         this.loggedIn = false;
         this.nodeHashes = new Map(); // Track node state for diff rendering
+        this.ws = null;
+        this.wsReconnectTimer = null;
         this.init();
     }
 
@@ -30,8 +32,62 @@ class App {
 
         if (this.loggedIn) {
             await this.loadData();
-            // Auto refresh every 5s
-            setInterval(() => this.loadData(), 5000);
+            this.connectWebSocket();
+        }
+    }
+
+    connectWebSocket() {
+        if (this.ws) {
+            this.ws.close();
+        }
+
+        const wsUrl = API.getWebSocketUrl();
+        this.ws = new WebSocket(wsUrl);
+
+        this.ws.onopen = () => {
+            console.log('WebSocket connected');
+            if (this.wsReconnectTimer) {
+                clearTimeout(this.wsReconnectTimer);
+                this.wsReconnectTimer = null;
+            }
+        };
+
+        this.ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                this.handleWSMessage(msg);
+            } catch (e) {
+                console.error('WS message parse error:', e);
+            }
+        };
+
+        this.ws.onclose = () => {
+            console.log('WebSocket closed, reconnecting in 5s...');
+            this.wsReconnectTimer = setTimeout(() => this.connectWebSocket(), 5000);
+        };
+
+        this.ws.onerror = (err) => {
+            console.error('WebSocket error:', err);
+        };
+    }
+
+    handleWSMessage(msg) {
+        switch (msg.type) {
+            case 'init':
+            case 'refresh':
+                this.nodes = msg.nodes || [];
+                this.render();
+                break;
+            case 'node_update':
+                // Update single node
+                const idx = this.nodes.findIndex(n => n.tag === msg.node.tag);
+                if (idx >= 0) {
+                    this.nodes[idx] = msg.node;
+                } else {
+                    this.nodes.push(msg.node);
+                }
+                this.render();
+                break;
         }
     }
 
@@ -43,7 +99,7 @@ class App {
                 document.getElementById('modal-container').innerHTML = ''; // close modal
                 this.updateAuthUI();
                 await this.loadData();
-                setInterval(() => this.loadData(), 5000); // start polling
+                this.connectWebSocket(); // Use WebSocket instead of polling
                 UI.showToast('Login Successful', 'success');
             }
         } catch (e) {
@@ -477,10 +533,22 @@ class App {
             const allIpsText = res.all_ips && res.all_ips.length > 1
                 ? `<div class="text-secondary" style="font-size:0.75rem; margin-top:4px">检测到: ${res.all_ips.join(', ')}</div>`
                 : '';
+
+            // Initial display
             resultContainer.innerHTML = `
-                <div class="ip-result">${stableIcon} IP: ${res.ip}</div>
+                <div class="ip-result">${stableIcon} IP: ${res.ip} <span class="geo-loading">🌍...</span></div>
                 ${allIpsText}
             `;
+
+            // Fetch GeoIP async
+            try {
+                const geo = await API.getGeoIP(res.ip);
+                const geoText = `${UI.countryFlag(geo.country_code)} ${geo.city || geo.country}`;
+                resultContainer.querySelector('.geo-loading').outerHTML = `<span class="geo-info">${geoText}</span>`;
+            } catch (geoErr) {
+                resultContainer.querySelector('.geo-loading').outerHTML = '';
+            }
+
             UI.showToast(res.is_stable ? 'IP稳定' : 'IP不稳定(多个出口)', res.is_stable ? 'success' : 'info');
         } catch (err) {
             resultContainer.innerHTML = `<span style="color: var(--error)">查询失败</span>`;

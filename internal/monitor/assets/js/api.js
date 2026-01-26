@@ -108,4 +108,13 @@ export class API {
     static getExportUrl() {
         return '/api/export';
     }
+
+    static async getGeoIP(ip) {
+        return this.request(`/api/nodes/geoip?ip=${encodeURIComponent(ip)}`);
+    }
+
+    static getWebSocketUrl() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}/ws`;
+    }
 }
