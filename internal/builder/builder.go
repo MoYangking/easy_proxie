@@ -154,7 +154,7 @@ func Build(cfg *config.Config) (option.Options, error) {
 			}
 			inboundTag := fmt.Sprintf("in-%s", tag)
 			inbounds = append(inbounds, option.Inbound{
-				Type:    C.TypeHTTP,
+				Type:    "mixed",
 				Tag:     inboundTag,
 				Options: inboundOptions,
 			})
@@ -202,8 +202,8 @@ func buildPoolInbound(cfg *config.Config) (option.Inbound, error) {
 		}}
 	}
 	inbound := option.Inbound{
-		Type:    C.TypeHTTP,
-		Tag:     "http-in",
+		Type:    "mixed",
+		Tag:     "mixed-in",
 		Options: inboundOptions,
 	}
 	return inbound, nil
@@ -792,9 +792,11 @@ func printProxyLinks(cfg *config.Config, metadata map[string]poolout.MemberMeta)
 		if cfg.Listener.Username != "" {
 			auth = fmt.Sprintf("%s:%s@", cfg.Listener.Username, cfg.Listener.Password)
 		}
-		proxyURL := fmt.Sprintf("http://%s%s:%d", auth, cfg.Listener.Address, cfg.Listener.Port)
+		socksURL := fmt.Sprintf("socks5://%s%s:%d", auth, cfg.Listener.Address, cfg.Listener.Port)
+		httpURL := fmt.Sprintf("http://%s%s:%d", auth, cfg.Listener.Address, cfg.Listener.Port)
 		log.Printf("🌐 Pool Entry Point:")
-		log.Printf("   %s", proxyURL)
+		log.Printf("   %s", socksURL)
+		log.Printf("   %s", httpURL)
 		log.Println("")
 		log.Printf("   Nodes in pool (%d):", len(metadata))
 		for _, meta := range metadata {
@@ -820,9 +822,11 @@ func printProxyLinks(cfg *config.Config, metadata map[string]poolout.MemberMeta)
 			if username != "" {
 				auth = fmt.Sprintf("%s:%s@", username, password)
 			}
-			proxyURL := fmt.Sprintf("http://%s%s:%d", auth, cfg.MultiPort.Address, node.Port)
+			socksURL := fmt.Sprintf("socks5://%s%s:%d", auth, cfg.MultiPort.Address, node.Port)
+			httpURL := fmt.Sprintf("http://%s%s:%d", auth, cfg.MultiPort.Address, node.Port)
 			log.Printf("   [%d] %s", node.Port, node.Name)
-			log.Printf("       %s", proxyURL)
+			log.Printf("       %s", socksURL)
+			log.Printf("       %s", httpURL)
 		}
 	}
 

@@ -8,7 +8,7 @@ management:
   password: ""  # WebUI 访问密码，为空则不需要密码（可选）
 listener:
   address: 0.0.0.0
-  port: 2323
+  port: 2324
   username: ""  # 代理认证用户名，为空则不需要认证（可选）
   password: ""  # 代理认证密码，为空则不需要认证（可选）
 pool:
@@ -44,4 +44,3 @@ nodes:
 # nodes_file: nodes.txt
 # nodes:
 #   - uri: "vless://xxx@server:443#额外节点"
-

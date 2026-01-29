@@ -60,7 +60,7 @@ management:
 
 listener:
   address: 0.0.0.0
-  port: 2323
+  port: 2324
   username: ""
   password: ""
 

@@ -79,7 +79,7 @@ management:
 # 统一入口监听
 listener:
   address: 0.0.0.0
-  port: 2323
+  port: 2324
   username: ""                # 代理认证用户名，为空则不需要认证（可选）
   password: ""                # 代理认证密码，为空则不需要认证（可选）
 
@@ -108,7 +108,7 @@ mode: pool
 
 listener:
   address: 0.0.0.0
-  port: 2323
+  port: 2324
   username: ""  # 可选
   password: ""  # 可选
 
@@ -120,7 +120,7 @@ pool:
 
 **适用场景：** 自动故障转移、负载均衡
 
-**使用方式：** 配置代理为 `http://localhost:2323`（若启用认证则为 `http://user:pass@localhost:2323`）
+**使用方式：** 配置代理为 `socks5://localhost:2324`（若启用认证则为 `socks5://user:pass@localhost:2324`）。同端口也支持 `http://localhost:2324`。
 
 #### Multi-Port 模式（多端口）
 
@@ -157,10 +157,13 @@ nodes_file: nodes.txt
 🔌 Multi-Port Mode (3 nodes):
 
    [24000] 台湾节点
+       socks5://0.0.0.0:24000
        http://0.0.0.0:24000
    [24001] 香港节点
+       socks5://0.0.0.0:24001
        http://0.0.0.0:24001
    [24002] 美国节点
+       socks5://0.0.0.0:24002
        http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
@@ -178,7 +181,7 @@ mode: hybrid
 
 listener:
   address: 0.0.0.0
-  port: 2323           # 节点池入口
+  port: 2324           # 节点池入口
   username: ""  # 可选
   password: ""  # 可选
 
@@ -200,7 +203,8 @@ pool:
 📡 Proxy Links:
 ═══════════════════════════════════════════════════════════════
 🌐 Pool Entry Point:
-   http://0.0.0.0:2323
+   socks5://0.0.0.0:2324
+   http://0.0.0.0:2324
 
    Nodes in pool (3):
    • 台湾节点
@@ -210,10 +214,13 @@ pool:
 🔌 Multi-Port Entry Points (3 nodes):
 
    [24000] 台湾节点
+       socks5://0.0.0.0:24000
        http://0.0.0.0:24000
    [24001] 香港节点
+       socks5://0.0.0.0:24001
        http://0.0.0.0:24001
    [24002] 美国节点
+       socks5://0.0.0.0:24002
        http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
@@ -334,7 +341,7 @@ hysteria2://password@server:port?sni=example.com&insecure=0&obfs=salamander&obfs
 - 失败次数统计
 - 手动探测延迟
 - 解除节点拉黑
-- **一键导出节点**: 导出所有可用节点的代理池 URI（格式：`http://host:port`；若启用认证则为 `http://user:pass@host:port`）
+- **一键导出节点**: 导出所有可用节点的代理池 URI（默认：`socks5://host:port`；如需 `http://...` 使用 `/api/export?scheme=http`）
 - **设置**: 点击齿轮图标修改 `external_ip` 和 `probe_target`（立即保存生效）
 
 ### WebUI 设置
@@ -457,7 +464,7 @@ subscription_refresh:
 
 | 端口 | 用途 |
 |------|------|
-| 2323 | 统一代理入口（节点池/混合模式） |
+| 2324 | 统一代理入口（节点池/混合模式） |
 | 9090 | Web 监控面板 |
 | 24000+ | 每节点独立端口（多端口/混合模式） |
 
@@ -498,7 +505,7 @@ services:
     container_name: easy-proxies
     restart: unless-stopped
     ports:
-      - "2323:2323"       # 节点池/混合模式入口
+      - "2324:2324"       # 节点池/混合模式入口
       - "9090:9090"       # Web 监控面板
       - "24000-24200:24000-24200"  # 多端口/混合模式
     volumes:

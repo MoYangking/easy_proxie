@@ -79,7 +79,7 @@ management:
 # Unified Entry Listener
 listener:
   address: 0.0.0.0
-  port: 2323
+  port: 2324
   username: ""               # Proxy auth username (optional, empty = no auth)
   password: ""               # Proxy auth password (optional, empty = no auth)
 
@@ -108,7 +108,7 @@ mode: pool
 
 listener:
   address: 0.0.0.0
-  port: 2323
+  port: 2324
   username: ""  # optional
   password: ""  # optional
 
@@ -120,7 +120,7 @@ pool:
 
 **Use Case:** Automatic failover, load balancing
 
-**Usage:** Set proxy to `http://localhost:2323` (or `http://user:pass@localhost:2323` if auth enabled)
+**Usage:** Set proxy to `socks5://localhost:2324` (or `socks5://user:pass@localhost:2324` if auth enabled). `http://localhost:2324` is also supported.
 
 #### Multi-Port Mode
 
@@ -156,10 +156,13 @@ nodes_file: nodes.txt
 🔌 Multi-Port Mode (3 nodes):
 
    [24000] Taiwan Node
+       socks5://0.0.0.0:24000
        http://0.0.0.0:24000
    [24001] Hong Kong Node
+       socks5://0.0.0.0:24001
        http://0.0.0.0:24001
    [24002] US Node
+       socks5://0.0.0.0:24002
        http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
@@ -177,7 +180,7 @@ mode: hybrid
 
 listener:
   address: 0.0.0.0
-  port: 2323           # Pool entry point
+  port: 2324           # Pool entry point
   username: ""  # optional
   password: ""  # optional
 
@@ -199,7 +202,8 @@ pool:
 📡 Proxy Links:
 ═══════════════════════════════════════════════════════════════
 🌐 Pool Entry Point:
-   http://0.0.0.0:2323
+   socks5://0.0.0.0:2324
+   http://0.0.0.0:2324
 
    Nodes in pool (3):
    • Taiwan Node
@@ -209,10 +213,13 @@ pool:
 🔌 Multi-Port Entry Points (3 nodes):
 
    [24000] Taiwan Node
+       socks5://0.0.0.0:24000
        http://0.0.0.0:24000
    [24001] Hong Kong Node
+       socks5://0.0.0.0:24001
        http://0.0.0.0:24001
    [24002] US Node
+       socks5://0.0.0.0:24002
        http://0.0.0.0:24002
 ═══════════════════════════════════════════════════════════════
 ```
@@ -333,7 +340,7 @@ Access `http://localhost:9090` to view:
 - Failure count
 - Manual latency probing
 - Release blacklisted nodes
-- **One-click Export**: Export all available nodes as proxy URIs (`http://host:port`, or `http://user:pass@host:port` if auth enabled)
+- **One-click Export**: Export all available nodes as proxy URIs (`socks5://host:port` by default; use `/api/export?scheme=http` for `http://...`)
 - **Settings**: Click the gear icon to modify `external_ip` and `probe_target` (changes saved immediately)
 
 ### WebUI Settings
@@ -456,7 +463,7 @@ subscription_refresh:
 
 | Port | Purpose |
 |------|---------|
-| 2323 | Unified proxy entry (Pool/Hybrid mode) |
+| 2324 | Unified proxy entry (Pool/Hybrid mode) |
 | 9090 | Web dashboard |
 | 24000+ | Per-node ports (Multi-Port/Hybrid mode) |
 
@@ -497,7 +504,7 @@ services:
     container_name: easy-proxies
     restart: unless-stopped
     ports:
-      - "2323:2323"       # Pool/Hybrid mode entry
+      - "2324:2324"       # Pool/Hybrid mode entry
       - "9090:9090"       # Web dashboard
       - "24000-24200:24000-24200"  # Multi-Port/Hybrid mode
     volumes:

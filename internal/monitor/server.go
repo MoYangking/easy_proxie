@@ -965,6 +965,18 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scheme := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scheme")))
+	if scheme == "" {
+		scheme = "socks5"
+	}
+	switch scheme {
+	case "socks5", "http":
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("invalid scheme, expected socks5 or http\n"))
+		return
+	}
+
 	// 只导出初始检查通过的可用节点
 	snapshots := s.mgr.SnapshotFiltered(true)
 	var lines []string
@@ -985,12 +997,13 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var proxyURI string
-		if s.cfg.ProxyUsername != "" && s.cfg.ProxyPassword != "" {
-			proxyURI = fmt.Sprintf("http://%s:%s@%s:%d",
+		if s.cfg.ProxyUsername != "" {
+			proxyURI = fmt.Sprintf("%s://%s:%s@%s:%d",
+				scheme,
 				s.cfg.ProxyUsername, s.cfg.ProxyPassword,
 				listenAddr, snap.Port)
 		} else {
-			proxyURI = fmt.Sprintf("http://%s:%d", listenAddr, snap.Port)
+			proxyURI = fmt.Sprintf("%s://%s:%d", scheme, listenAddr, snap.Port)
 		}
 		lines = append(lines, proxyURI)
 	}

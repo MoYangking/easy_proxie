@@ -35,7 +35,7 @@ type Config struct {
 	filePath string `yaml:"-"` // 配置文件路径，用于保存
 }
 
-// ListenerConfig defines how the HTTP proxy should listen for clients.
+// ListenerConfig defines how the mixed (SOCKS5/HTTP) proxy should listen for clients.
 type ListenerConfig struct {
 	Address  string `yaml:"address"`
 	Port     uint16 `yaml:"port"`
@@ -142,7 +142,7 @@ func (c *Config) normalize() error {
 		c.Listener.Address = "0.0.0.0"
 	}
 	if c.Listener.Port == 0 {
-		c.Listener.Port = 2323
+		c.Listener.Port = 2324
 	}
 	if c.Pool.Mode == "" {
 		c.Pool.Mode = "sequential"
@@ -352,7 +352,7 @@ func (c *Config) NormalizeWithPortMap(portMap map[string]uint16) error {
 		c.Listener.Address = "0.0.0.0"
 	}
 	if c.Listener.Port == 0 {
-		c.Listener.Port = 2323
+		c.Listener.Port = 2324
 	}
 	if c.Pool.Mode == "" {
 		c.Pool.Mode = "sequential"
